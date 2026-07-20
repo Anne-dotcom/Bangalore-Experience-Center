@@ -10,6 +10,18 @@ import { Server }       from 'socket.io'
 const PORT = process.env.PORT || 3001
 
 const httpServer = createServer()
+
+// Simple HTTP health check so Railway (and other platforms) can verify
+// the server started successfully. Socket.io attaches its own listener
+// to the same httpServer, but plain HTTP GET requests (like health
+// checks) need an explicit handler or they'll hang/time out.
+httpServer.on('request', (req, res) => {
+  if (req.method === 'GET' && req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' })
+    res.end(JSON.stringify({ status: 'ok' }))
+  }
+})
+
 const io = new Server(httpServer, {
   cors: { origin: '*' },          // allow any origin (local network install)
   pingInterval: 5000,             // heartbeat every 5 s
