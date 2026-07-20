@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BEC — TV</title>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend+Zetta:wght@800&family=Lexend+Giga:wght@300;400&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+
+    #start-ui {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center; pointer-events: none;
+      opacity: 0; transition: opacity 0.9s ease;
+    }
+    #start-ui.visible { opacity: 1; }
+
+    #start-word {
+      font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(44px, 7vw, 82px); font-weight: 800;
+      letter-spacing: 0.28em; color: #00C8D5;
+      text-shadow: 0 0 32px rgba(0,200,213,0.75), 0 0 80px rgba(0,200,213,0.25);
+      transition: text-shadow 0.3s ease, letter-spacing 0.3s ease;
+    }
+    #start-word.activated {
+      letter-spacing: 0.35em;
+      text-shadow: 0 0 20px rgba(0,200,213,1), 0 0 70px rgba(0,200,213,0.9), 0 0 160px rgba(0,200,213,0.5);
+      animation: word-pulse 0.5s ease-in-out infinite alternate;
+    }
+    @keyframes word-pulse { from { opacity: 0.85; } to { opacity: 1; } }
+
+    #hint {
+      margin-top: 14px; font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(10px, 1.2vw, 14px); letter-spacing: 0.4em;
+      text-transform: uppercase; color: rgba(0,200,213,0.4);
+      opacity: 0; transition: opacity 0.7s ease 0.4s;
+    }
+    #hint.visible { opacity: 1; }
+
+    #progress-wrap {
+      margin: 14px auto 0; width: 80px; height: 2px;
+      background: rgba(0,200,213,0.12); border-radius: 1px;
+      overflow: hidden; opacity: 0; transition: opacity 0.25s;
+    }
+    #progress-wrap.active { opacity: 1; }
+    #progress-bar { height: 100%; width: 0%; background: #00C8D5; border-radius: 1px; }
+
+    #status {
+      position: fixed; bottom: 12px; right: 14px;
+      font-family: monospace; font-size: 10px;
+      color: rgba(255,255,255,0.18); pointer-events: none;
+    }
+
+    /* ── GALLERY LOOP ───────────────────────────────────────────────────────── */
+    #gallery-loop {
+      position: fixed; inset: 0; z-index: 20;
+      background: #05101E;
+      display: flex; flex-direction: column; align-items: center;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.8s ease;
+    }
+    #gallery-loop.visible { opacity: 1; pointer-events: auto; }
+
+    /* Subtle bloom matching projector gallery */
+    #gallery-loop::before {
+      content: '';
+      position: absolute; inset: -30%;
+      background:
+        radial-gradient(ellipse 60% 55% at 50% 45%, rgba(2,16,38,0.9) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 40% at 30% 40%, rgba(0,40,80,0.3) 0%, transparent 65%),
+        radial-gradient(ellipse 40% 45% at 70% 55%, rgba(0,60,90,0.3) 0%, transparent 65%);
+      filter: blur(55px);
+      pointer-events: none; z-index: 0;
+    }
+
+    #gl-stage {
+      position: relative; width: 100%; flex: 0 0 60%;
+      perspective: 900px;
+      z-index: 1;
+    }
+
+    .gl-card {
+      position: absolute; top: 50%; left: 50%;
+      width: clamp(200px, 28vw, 320px);
+      height: clamp(130px, 18vw, 210px);
+      margin-top: -clamp(65px, 9vw, 105px);
+      margin-left: -clamp(100px, 14vw, 160px);
+      transition: transform 0.55s cubic-bezier(.4,0,.2,1), opacity 0.55s ease, filter 0.55s ease;
+      transform-style: preserve-3d;
+    }
+    .gl-card-inner {
+      width: 100%; height: 100%;
+      border-radius: 6px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow:
+        0 6px 28px rgba(0,0,0,0.7),
+        0 0 0 1px rgba(255,255,255,0.04),
+        inset 0 0 0 1px rgba(255,255,255,0.06);
+      background: rgba(5,16,30,0.9);
+    }
+    .gl-card-inner img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+    .gl-card.pos-0  { transform: translateX(0)     translateZ(0px)    scale(1);    opacity: 1;    filter: brightness(1); }
+    .gl-card.pos-1  { transform: translateX(46vw)  translateZ(-180px) scale(0.68); opacity: 0.55; filter: brightness(0.6); }
+    .gl-card.pos-n1 { transform: translateX(-46vw) translateZ(-180px) scale(0.68); opacity: 0.55; filter: brightness(0.6); }
+    .gl-card.pos-2  { transform: translateX(76vw)  translateZ(-300px) scale(0.48); opacity: 0.28; filter: brightness(0.4); }
+    .gl-card.pos-n2 { transform: translateX(-76vw) translateZ(-300px) scale(0.48); opacity: 0.28; filter: brightness(0.4); }
+    .gl-card.hidden { transform: translateX(0)     translateZ(-420px) scale(0.3);  opacity: 0;    pointer-events: none; }
+
+    .gl-card.pos-0 .gl-card-inner { animation: gl-float 3.8s ease-in-out infinite; }
+    @keyframes gl-float {
+      0%, 100% { transform: translateY(0); }
+      50%       { transform: translateY(-14px); }
+    }
+
+    #gl-info {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-start;
+      padding: 14px 10% 0; text-align: center;
+      transition: opacity 0.35s ease;
+      position: relative; z-index: 1;
+    }
+    #gl-info.fading { opacity: 0; }
+
+    #gl-title {
+      font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(20px, 3.5vw, 36px); font-weight: 800;
+      letter-spacing: 0.18em; color: #00C8D5;
+      text-shadow: 0 0 24px rgba(0,200,213,0.5);
+      margin-bottom: 8px;
+    }
+    #gl-desc {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(11px, 1.4vw, 15px); font-weight: 300;
+      color: rgba(255,255,255,0.55); line-height: 1.6;
+      max-width: 520px; margin-bottom: 12px;
+    }
+    #gl-tags {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      justify-content: center; margin-bottom: 16px;
+    }
+    .gl-tag {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(8px, 0.9vw, 10px); font-weight: 400;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      padding: 4px 10px; border-radius: 20px;
+      border: 1px solid rgba(0,200,213,0.35);
+      color: rgba(0,200,213,0.7);
+    }
+    #gl-dots { display: flex; gap: 8px; align-items: center; justify-content: center; }
+    .gl-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: rgba(255,255,255,0.25);
+      transition: transform 0.35s ease, background 0.35s ease;
+    }
+    .gl-dot.active {
+      background: #00C8D5; transform: scale(1.7);
+      box-shadow: 0 0 8px rgba(0,200,213,0.6);
+    }
+  </style>
+</head>
+<body>
+  <video id="webcam" playsinline autoplay muted style="display:none"></video>
+  <canvas id="tv-canvas"></canvas>
+  <div id="start-ui">
+    <div id="start-word">START</div>
+    <div id="hint">Raise your hand</div>
+    <div id="progress-wrap"><div id="progress-bar"></div></div>
+  </div>
+  <div id="status">IDLE</div>
+
+  <div id="gallery-loop">
+    <div id="gl-stage"></div>
+    <div id="gl-info">
+      <div id="gl-title"></div>
+      <div id="gl-desc"></div>
+      <div id="gl-tags"></div>
+      <div id="gl-dots"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/selfie_segmentation.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+  <script>
+  const PROJECTS = [
+    { title: 'OLAM',      img: '/images/olam.png',     tags: ['MARKET', 'BRAND IDENTITY'],          description: 'A landmark brand experience connecting global agriculture with a modern identity rooted in purpose and place.' },
+    { title: 'INFOSYS',   img: '/images/infosys.jpg',  tags: ['DIGITAL EXPERIENCE', 'UX DESIGN'],   description: 'An immersive digital experience center that translates enterprise technology into human-centered narratives.' },
+    { title: 'TATA',      img: '/images/tata.jpg',     tags: ['BRAND STRATEGY', 'IDENTITY'],        description: 'A brand strategy that honours over a century of legacy while positioning Tata for a dynamic future.' },
+    { title: 'WIPRO',     img: '/images/wipro.jpg',    tags: ['INNOVATION', 'DIGITAL'],             description: 'Reimagining the workplace as a platform for innovation — where digital and physical converge seamlessly.' },
+    { title: 'BIOCON',    img: '/images/biocon.jpg',   tags: ['RESEARCH', 'COMMUNICATION'],         description: 'Science communication reimagined — translating complex biopharmaceutical research into vivid, accessible stories.' },
+    { title: 'MINDTREE',  img: '/images/mindtree.jpg', tags: ['CONSULTING', 'EXPERIENCE'],          description: 'An experience center that brings consulting expertise to life through spatial storytelling and interactive discovery.' },
+    { title: 'HERO',      img: '/images/tata.jpg',     tags: ['MOBILITY', 'BRAND EXPERIENCE'],      description: 'A bold mobility brand experience that captures the spirit of two-wheeled freedom and aspiration across India.' },
+    { title: 'ACCENTURE', img: '/images/infosys.jpg',  tags: ['STRATEGY', 'INNOVATION HUB'],        description: 'A future-of-work innovation hub where strategy meets design — built for the next generation of enterprise thinking.' },
+    { title: 'SIEMENS',   img: '/images/wipro.jpg',    tags: ['INDUSTRIAL', 'SMART INFRASTRUCTURE'], description: 'Smart infrastructure brought to life — an experience that makes industrial intelligence tangible and inspiring.' },
+    { title: 'RELIANCE',  img: '/images/olam.png',     tags: ['RETAIL', 'DIGITAL TRANSFORMATION'],  description: 'Transforming retail at scale — a phygital experience that reimagines how millions of Indians discover and buy.' },
+  ]
+
+  const SERVER_URL   = localStorage.getItem('bec_server') || 'http://localhost:3001'
+  const STABLE_MS    = 2000
+  const RING_FORM_MS = 1400
+  const HAND_HOLD_MS = 500
+  const COOLDOWN_MS  = 30000
+  const RING_R       = 150
+  const SIL_N        = 5000
+  const GLOW_N       = 700
+  const RING_N       = 120
+  const MASK_W = 160, MASK_H = 90
+
+  // ── THREE.JS ──────────────────────────────────────────────────────────────────
+  const W = window.innerWidth, H = window.innerHeight
+  const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('tv-canvas'), antialias: false })
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+  renderer.setSize(W, H)
+  renderer.setClearColor(0x000000, 1)
+
+  const cam = new THREE.OrthographicCamera(-W/2, W/2, H/2, -H/2, 0.1, 10)
+  cam.position.z = 1
+  const scene = new THREE.Scene()
+
+  const VERT = `
+    attribute float aAlpha; attribute float aSize; varying float vAlpha;
+    void main() {
+      vAlpha = aAlpha; gl_PointSize = aSize;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
+    }`
+  const FRAG = `
+    uniform sampler2D uTex; varying float vAlpha;
+    void main() {
+      vec4 c = texture2D(uTex, gl_PointCoord);
+      gl_FragColor = vec4(c.rgb, c.a * vAlpha);
+      if (gl_FragColor.a < 0.01) discard;
+    }`
+
+  function makeTex(r, g, b) {
+    const c = document.createElement('canvas'); c.width = c.height = 64
+    const x = c.getContext('2d')
+    const gd = x.createRadialGradient(32,32,0, 32,32,32)
+    gd.addColorStop(0,    `rgba(${r},${g},${b},1)`)
+    gd.addColorStop(0.4,  `rgba(${r},${g},${b},0.7)`)
+    gd.addColorStop(0.75, `rgba(${r},${g},${b},0.15)`)
+    gd.addColorStop(1,    `rgba(${r},${g},${b},0)`)
+    x.fillStyle = gd; x.fillRect(0,0,64,64)
+    return new THREE.CanvasTexture(c)
+  }
+
+  function makePoints(n, r, g, b) {
+    const pos = new Float32Array(n*3), alph = new Float32Array(n), size = new Float32Array(n)
+    const geo = new THREE.BufferGeometry()
+    geo.setAttribute('position', new THREE.BufferAttribute(pos,  3))
+    geo.setAttribute('aAlpha',   new THREE.BufferAttribute(alph, 1))
+    geo.setAttribute('aSize',    new THREE.BufferAttribute(size, 1))
+    scene.add(new THREE.Points(geo, new THREE.ShaderMaterial({
+      uniforms: { uTex: { value: makeTex(r,g,b) } },
+      vertexShader: VERT, fragmentShader: FRAG,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    })))
+    return { pos, alph, size, geo }
+  }
+
+  const sil  = makePoints(SIL_N,  0, 195, 210)
+  const glow = makePoints(GLOW_N, 0, 110, 170)
+  const ring = makePoints(RING_N, 0, 230, 245)
+
+  for (let i = 0; i < SIL_N;  i++) sil.size[i]  = 2 + Math.random() * 4
+  for (let i = 0; i < GLOW_N; i++) glow.size[i] = 14 + Math.random() * 20
+  for (let i = 0; i < RING_N; i++) ring.size[i] = 5  + Math.random() * 6
+  sil.geo.attributes.aSize.needsUpdate  = true
+  glow.geo.attributes.aSize.needsUpdate = true
+  ring.geo.attributes.aSize.needsUpdate = true
+
+  const silScat  = new Float32Array(SIL_N  * 3)
+  const glowScat = new Float32Array(GLOW_N * 3)
+  for (let i = 0; i < SIL_N;  i++) { silScat[i*3]  = (Math.random()-0.5)*W*1.6; silScat[i*3+1]  = (Math.random()-0.5)*H*1.6 }
+  for (let i = 0; i < GLOW_N; i++) { glowScat[i*3] = (Math.random()-0.5)*W*1.6; glowScat[i*3+1] = (Math.random()-0.5)*H*1.6 }
+
+  // ── PRE-ALLOCATED MASK BUFFERS (avoids per-frame heap allocation) ─────────────
+  const mCv  = document.createElement('canvas'); mCv.width = MASK_W; mCv.height = MASK_H
+  const mCtx = mCv.getContext('2d', { willReadFrequently: true })
+  const _px  = new Int16Array(MASK_W * MASK_H * 2)   // x,y pairs — never reallocated
+  const _ys  = new Float32Array(MASK_W * MASK_H)     // for percentile sort
+  let   _pxN = 0                                     // how many pixels this frame
+
+  // ── STATE ─────────────────────────────────────────────────────────────────────
+  let state = 'IDLE', t0 = 0
+  let stableMs = 0, handMs = 0, fired = false
+  let visible = false, handUp = false
+  let headTopBaseline = 0
+
+  const silTX  = new Float32Array(SIL_N),  silTY  = new Float32Array(SIL_N)
+  const glowTX = new Float32Array(GLOW_N), glowTY = new Float32Array(GLOW_N)
+  const rPhase = Float32Array.from({ length: RING_N }, () => (Math.random()-0.5)*0.3)
+
+  // ── GALLERY LOOP ─────────────────────────────────────────────────────────────
+  let _galIdx = 0, _galCards = [], _galAdvTimer = null
+  let _galEl = null, _glInfo = null, _glTitle = null, _glDesc = null, _glTags = null, _glDots = null
+
+  function _buildGallery() {
+    _galEl   = document.getElementById('gallery-loop')
+    _glInfo  = document.getElementById('gl-info')
+    _glTitle = document.getElementById('gl-title')
+    _glDesc  = document.getElementById('gl-desc')
+    _glTags  = document.getElementById('gl-tags')
+    _glDots  = document.getElementById('gl-dots')
+    const stage = document.getElementById('gl-stage')
+
+    PROJECTS.forEach(p => {
+      const outer = document.createElement('div')
+      outer.className = 'gl-card hidden'
+      const inner = document.createElement('div')
+      inner.className = 'gl-card-inner'
+      if (p.img) {
+        const img = document.createElement('img')
+        img.src = p.img; img.alt = p.title
+        inner.appendChild(img)
+      }
+      outer.appendChild(inner)
+      stage.appendChild(outer)
+      _galCards.push(outer)
+    })
+
+    PROJECTS.forEach(() => {
+      const dot = document.createElement('div')
+      dot.className = 'gl-dot'
+      _glDots.appendChild(dot)
+    })
+  }
+
+  function _applyGalleryPositions() {
+    const n = PROJECTS.length
+    _galCards.forEach((card, i) => {
+      const diff = ((i - _galIdx + n) % n)
+      let cls = 'hidden'
+      if      (diff === 0)     cls = 'pos-0'
+      else if (diff === 1)     cls = 'pos-1'
+      else if (diff === n - 1) cls = 'pos-n1'
+      else if (diff === 2)     cls = 'pos-2'
+      else if (diff === n - 2) cls = 'pos-n2'
+      card.className = `gl-card ${cls}`
+    })
+    _glDots.querySelectorAll('.gl-dot').forEach((d, i) => d.classList.toggle('active', i === _galIdx))
+  }
+
+  function _updateGalleryInfo(fade) {
+    const apply = () => {
+      const p = PROJECTS[_galIdx]
+      _glTitle.textContent = p.title
+      _glDesc.textContent  = p.description
+      _glTags.innerHTML    = p.tags.map(t => `<span class="gl-tag">${t}</span>`).join('')
+      _glInfo.classList.remove('fading')
+    }
+    if (fade) { _glInfo.classList.add('fading'); setTimeout(apply, 350) }
+    else apply()
+  }
+
+  function _galleryAdvance() {
+    _galIdx = (_galIdx + 1) % PROJECTS.length
+    _applyGalleryPositions()
+    _updateGalleryInfo(true)
+  }
+
+  function showGallery() {
+    if (!_galEl) _buildGallery()
+    _galIdx = 0
+    _applyGalleryPositions()
+    _updateGalleryInfo(false)
+    _galEl.classList.add('visible')
+    if (_galAdvTimer) clearInterval(_galAdvTimer)
+    _galAdvTimer = setInterval(_galleryAdvance, 3500)
+  }
+
+  function hideGallery() {
+    if (_galEl) _galEl.classList.remove('visible')
+    if (_galAdvTimer) { clearInterval(_galAdvTimer); _galAdvTimer = null }
+  }
+
+  function go(s) {
+    state = s; t0 = performance.now()
+    document.getElementById('status').textContent = s
+    if (s === 'IDLE' || s === 'COOLDOWN') headTopBaseline = 0
+    if (s === 'COOLDOWN') showGallery()
+    if (s === 'IDLE')     hideGallery()
+  }
+
+  // ── SOCKET.IO ─────────────────────────────────────────────────────────────────
+  const socket = io(SERVER_URL, { reconnection: true, reconnectionAttempts: Infinity })
+  socket.on('connect', () => { socket.emit('register', { role: 'tv' }) })
+
+  function fire() {
+    if (fired) return; fired = true
+    socket.emit('msg', { from: 'tv', to: 'podium', fn: 'personDetected', args: [] })
+    localStorage.setItem('bec_personDetected', String(Date.now()))
+  }
+
+  // ── MEDIAPIPE ─────────────────────────────────────────────────────────────────
+  const seg = new SelfieSegmentation({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/${f}`
+  })
+  seg.setOptions({ modelSelection: 1, selfieMode: true })
+
+  seg.onResults(({ segmentationMask }) => {
+    if (!segmentationMask) return
+    mCtx.drawImage(segmentationMask, 0, 0, MASK_W, MASK_H)
+    const d = mCtx.getImageData(0, 0, MASK_W, MASK_H).data
+
+    // Fill pre-allocated buffer — no heap allocation
+    _pxN = 0
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] > 110 || d[i+3] > 110) {
+        const idx = i >> 2
+        _px[_pxN++] = idx % MASK_W
+        _px[_pxN++] = (idx / MASK_W) | 0
+      }
+    }
+
+    const n = _pxN >> 1
+    visible = n > 200
+    if (!visible) { handUp = false; return }
+
+    // Sort Y values every active frame for percentile lookups
+    let ysLen = 0
+    for (let i = 1; i < _pxN; i += 2) _ys[ysLen++] = _px[i]
+    _ys.subarray(0, ysLen).sort()
+    const currTop = _ys[Math.max(0, (ysLen * 0.03) | 0)]  // 3rd pct ≈ head/hand top
+
+    // During approach: calibrate using Math.max so transient hand waves
+    // (which push currTop toward 0) do NOT corrupt the baseline — we want
+    // the most conservative (lowest-on-screen) head-top position, not the
+    // highest point ever reached.
+    if (state === 'DETECTING' || state === 'RING_FORMING') {
+      headTopBaseline = Math.max(headTopBaseline, currTop)
+    }
+
+    // Hand raised: current top-of-silhouette is clearly above the calibrated head position.
+    // headTopBaseline is a Y value (higher Y = lower on screen in mask coords).
+    // If currTop is well below headTopBaseline (smaller Y = higher on screen),
+    // something is sticking up above the head → raised hand.
+    handUp = state === 'RING_FULL' && headTopBaseline > 0 && (headTopBaseline - currTop) > 4
+
+    // Sample silhouette targets from mask
+    for (let i = 0; i < SIL_N; i++) {
+      const k = ((Math.random() * n) | 0) << 1
+      silTX[i] = (1 - _px[k]   / MASK_W - 0.5) * W + (Math.random()-0.5) * 6
+      silTY[i] = (0.5 - _px[k+1] / MASK_H)     * H + (Math.random()-0.5) * 6
+    }
+    for (let i = 0; i < GLOW_N; i++) {
+      const k = ((Math.random() * n) | 0) << 1
+      glowTX[i] = (1 - _px[k]   / MASK_W - 0.5) * W + (Math.random()-0.5) * 24
+      glowTY[i] = (0.5 - _px[k+1] / MASK_H)     * H + (Math.random()-0.5) * 24
+    }
+  })
+
+  // ── WEBCAM ────────────────────────────────────────────────────────────────────
+  const vid = document.getElementById('webcam')
+  let camReady = false, lastFed = 0
+  navigator.mediaDevices
+    .getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } })
+    .then(s => { vid.srcObject = s; vid.play(); camReady = true })
+    .catch(() => { document.getElementById('status').textContent = 'NO CAMERA' })
+
+  // ── DOM REFS ──────────────────────────────────────────────────────────────────
+  const ui    = document.getElementById('start-ui')
+  const word  = document.getElementById('start-word')
+  const hint  = document.getElementById('hint')
+  const pWrap = document.getElementById('progress-wrap')
+  const pBar  = document.getElementById('progress-bar')
+
+  const lerp = (a, b, t) => a + (b-a)*t
+
+  // ── RENDER LOOP ───────────────────────────────────────────────────────────────
+  let _lastNow = 0
+  function animate(now) {
+    requestAnimationFrame(animate)
+
+    // Real delta time — avoids hardcoded 16ms drift on non-60fps displays
+    const dt = Math.min(now - _lastNow, 50)
+    _lastNow = now
+
+    if (camReady && vid.readyState >= 2 && now - lastFed > 66) {
+      lastFed = now; seg.send({ image: vid })
+    }
+
+    const el   = now - t0
+    const idle = state === 'IDLE' || state === 'COOLDOWN'
+
+    // ── State machine ──────────────────────────────────────────────────────────
+    if (state === 'IDLE' || state === 'DETECTING') {
+      if (visible) {
+        stableMs += dt
+        if (state === 'IDLE') go('DETECTING')
+        if (stableMs >= STABLE_MS) go('RING_FORMING')
+      } else {
+        stableMs = Math.max(0, stableMs - dt * 1.5)
+        if (stableMs === 0 && state === 'DETECTING') go('IDLE')
+      }
+    }
+    if (state === 'RING_FORMING' && el >= RING_FORM_MS) go('RING_FULL')
+    if (state === 'RING_FULL') {
+      if (handUp) {
+        handMs = Math.min(handMs + dt, HAND_HOLD_MS)
+        if (handMs >= HAND_HOLD_MS) { fire(); go('FADING') }
+      } else {
+        handMs = Math.max(0, handMs - dt * 0.8)
+      }
+      if (!visible) go('FADING')
+    }
+    if (state === 'FADING'   && el >= 1800) { go('COOLDOWN'); stableMs = 0; handMs = 0 }
+    if (state === 'COOLDOWN' && el >= COOLDOWN_MS) { go('IDLE'); fired = false }
+
+    // ── Particle alphas ────────────────────────────────────────────────────────
+    const fade   = state === 'FADING' ? Math.max(0, 1 - el/1800) : 1
+    const sAlpha = idle ? 0
+                 : state === 'DETECTING' ? 0.75 * Math.min(1, stableMs/STABLE_MS)
+                 : 0.78 * fade
+    const lf = idle ? 0.02 : 0.08
+
+    for (let i = 0; i < SIL_N; i++) {
+      sil.pos[i*3]   = lerp(sil.pos[i*3],   idle ? silScat[i*3]   : silTX[i], lf)
+      sil.pos[i*3+1] = lerp(sil.pos[i*3+1], idle ? silScat[i*3+1] : silTY[i], lf)
+      sil.alph[i]    = lerp(sil.alph[i], sAlpha, 0.05)
+    }
+    sil.geo.attributes.position.needsUpdate = true
+    sil.geo.attributes.aAlpha.needsUpdate   = true
+
+    const gAlpha = sAlpha * 0.42
+    for (let i = 0; i < GLOW_N; i++) {
+      glow.pos[i*3]   = lerp(glow.pos[i*3],   idle ? glowScat[i*3]   : glowTX[i], lf)
+      glow.pos[i*3+1] = lerp(glow.pos[i*3+1], idle ? glowScat[i*3+1] : glowTY[i], lf)
+      glow.alph[i]    = lerp(glow.alph[i], gAlpha, 0.04)
+    }
+    glow.geo.attributes.position.needsUpdate = true
+    glow.geo.attributes.aAlpha.needsUpdate   = true
+
+    // ── Ring ──────────────────────────────────────────────────────────────────
+    let rR = 0, rA = 0
+    if (state === 'RING_FORMING') {
+      const p = Math.min(1, el/RING_FORM_MS), e = 1 - Math.pow(1-p, 3)
+      rR = RING_R * e; rA = e
+    } else if (state === 'RING_FULL') {
+      rR = RING_R; rA = handMs > 0 ? 1 + 0.35 * Math.sin(now * 0.014) : 1
+    } else if (state === 'FADING') {
+      rR = RING_R; rA = fade
+    }
+
+    const rot = now * 0.00008
+    for (let i = 0; i < RING_N; i++) {
+      const a = (i/RING_N)*Math.PI*2 + rot + rPhase[i]
+      ring.pos[i*3]   = lerp(ring.pos[i*3],   Math.cos(a)*rR, 0.1)
+      ring.pos[i*3+1] = lerp(ring.pos[i*3+1], Math.sin(a)*rR, 0.1)
+      ring.alph[i]    = lerp(ring.alph[i], rA, 0.07)
+    }
+    ring.geo.attributes.position.needsUpdate = true
+    ring.geo.attributes.aAlpha.needsUpdate   = true
+
+    // ── DOM ───────────────────────────────────────────────────────────────────
+    const show = (state === 'RING_FORMING' && el > RING_FORM_MS * 0.4)
+              || state === 'RING_FULL' || state === 'FADING'
+
+    ui.style.opacity = show ? String(fade) : '0'
+    ui.classList.toggle('visible', show)
+    hint.classList.toggle('visible', state === 'RING_FULL')
+    word.classList.toggle('activated', handMs > 0 && state === 'RING_FULL')
+    pWrap.classList.toggle('active', handMs > 0)
+    pBar.style.width = `${(handMs / HAND_HOLD_MS) * 100}%`
+
+    renderer.render(scene, cam)
+  }
+
+  requestAnimationFrame(animate)
+  </script>
+</body>
+</html>

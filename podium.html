@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BEC — Podium</title>
+  <link href="https://fonts.googleapis.com/css2?family=Lexend+Zetta:wght@700;800&family=Lexend+Giga:wght@300&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
+
+    /* Dark background — stays black, tunnel effect fills the canvas */
+    #ps-bg {
+      position: fixed; inset: 0; z-index: 0;
+      background: #000;
+      opacity: 0; transition: opacity 0.8s ease; pointer-events: none;
+    }
+    #ps-bg.visible { opacity: 1; }
+    #ps-bg::after {
+      content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #006E74 20%, #00B3BC 50%, #006E74 80%, transparent);
+    }
+
+    /* ── Canvas layers ─────────────────────────────────────────────────────── */
+    .ps-canvas {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; opacity: 0; transition: opacity 1.0s ease;
+    }
+    .ps-canvas.visible { opacity: 1; }
+    #canvas-back  { z-index: 1; }
+    #canvas-front { z-index: 3; display: none; }
+
+    /* ── Shared panel base ─────────────────────────────────────────────────── */
+    .ps-panel {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%) translateY(14px);
+      z-index: 2;
+      display: flex; flex-direction: column; align-items: center;
+      gap: clamp(18px, 3vh, 40px); text-align: center;
+      opacity: 0; transition: opacity 1.1s ease, transform 1.1s ease;
+      pointer-events: none;
+    }
+    .ps-panel.visible {
+      opacity: 1; transform: translate(-50%, -50%) translateY(0);
+      pointer-events: auto;
+    }
+
+    .ps-eyebrow {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(9px, 1.1vw, 13px); font-weight: 300;
+      letter-spacing: 0.45em; text-transform: uppercase;
+      color: rgba(120, 200, 255, 0.65);
+    }
+    .ps-heading {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(13px, 1.8vw, 22px); font-weight: 300;
+      letter-spacing: 0.12em; color: rgba(200, 230, 255, 0.80); line-height: 1.4;
+    }
+    .ps-btn {
+      font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(13px, 1.8vw, 20px); font-weight: 700;
+      letter-spacing: 0.3em; text-transform: uppercase;
+      color: #e8f4ff; background: transparent;
+      border: 1px solid rgba(0, 110, 116, 0.55);
+      padding: clamp(20px, 3vh, 36px) clamp(56px, 9vw, 110px);
+      cursor: pointer; outline: none; white-space: nowrap;
+      transition: border-color 0.4s, color 0.4s, box-shadow 0.4s;
+    }
+    .ps-btn:hover {
+      border-color: #00B3BC; color: #00C8D0;
+      box-shadow: 0 0 20px rgba(0,110,116,0.25);
+    }
+    .ps-hint {
+      font-family: 'Lexend Giga', sans-serif; font-size: clamp(8px, 0.9vw, 10px);
+      letter-spacing: 0.38em; text-transform: uppercase;
+      color: rgba(100, 170, 255, 0.30);
+    }
+
+    /* ── Panel 3: project galaxy navigation ────────────────────────────────── */
+    #ps-nav {
+      position: fixed; inset: 0;
+      display: flex; align-items: stretch;
+      z-index: 4; background: rgba(0, 5, 18, 0.96);
+      opacity: 0; transition: opacity 1s ease;
+      pointer-events: none;
+    }
+    #ps-nav.visible { opacity: 1; pointer-events: auto; }
+
+    .ps-nav-arrow {
+      flex: 0 0 clamp(60px, 9vw, 110px);
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; border: none; cursor: pointer;
+      color: rgba(0, 110, 116, 0.40); font-size: clamp(28px, 4vw, 52px);
+      transition: color 0.3s ease, background 0.3s ease;
+      font-family: 'Lexend Giga', sans-serif;
+    }
+    .ps-nav-arrow:hover { color: #00B3BC; background: rgba(0, 110, 116, 0.07); }
+    .ps-nav-arrow:active { background: rgba(0, 110, 116, 0.12); }
+
+    .ps-nav-center {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: clamp(10px, 2vh, 22px); text-align: center;
+      padding: 0 clamp(12px, 2vw, 32px); position: relative;
+    }
+
+    .ps-nav-kicker {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(8px, 0.9vw, 11px); font-weight: 300;
+      letter-spacing: 0.5em; text-transform: uppercase;
+      color: rgba(100, 180, 255, 0.55);
+    }
+    .ps-nav-counter {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(9px, 1vw, 12px); font-weight: 300;
+      letter-spacing: 0.4em; text-transform: uppercase;
+      color: rgba(100, 180, 255, 0.38);
+    }
+    .ps-nav-title {
+      font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(22px, 4.5vw, 64px); font-weight: 800;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: #d0e8ff; transition: opacity 0.3s ease;
+    }
+    .ps-nav-desc {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(10px, 1.3vw, 16px); font-weight: 300;
+      letter-spacing: 0.04em; line-height: 1.6;
+      color: rgba(180, 220, 255, 0.60); max-width: 55ch;
+      transition: opacity 0.3s ease;
+    }
+    .ps-nav-tags {
+      display: flex; flex-wrap: wrap; gap: 8px; justify-content: center;
+      transition: opacity 0.3s ease;
+    }
+    .ps-nav-tag {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(7px, 0.8vw, 10px); font-weight: 300;
+      letter-spacing: 0.32em; text-transform: uppercase;
+      color: rgba(100, 180, 255, 0.75);
+      border: 1px solid rgba(0, 110, 116, 0.28);
+      padding: 5px 14px; border-radius: 20px;
+    }
+    .ps-nav-view-cta {
+      font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(10px, 1.3vw, 16px); font-weight: 700;
+      letter-spacing: 0.28em; text-transform: uppercase;
+      color: #d0e8ff; background: transparent;
+      border: 1.5px solid rgba(0, 110, 116, 0.65);
+      padding: clamp(12px, 1.8vh, 20px) clamp(28px, 4vw, 56px);
+      cursor: pointer; outline: none; margin-top: 4px; white-space: nowrap;
+      transition: border-color 0.35s, color 0.35s, box-shadow 0.35s;
+    }
+    .ps-nav-view-cta:hover {
+      border-color: #00B3BC; color: #00C8D0;
+      box-shadow: 0 0 16px rgba(0,110,116,0.20);
+    }
+
+    .ps-nav-bottom {
+      position: absolute; bottom: clamp(18px, 3vh, 36px); left: 50%;
+      transform: translateX(-50%);
+      display: flex; align-items: center; gap: clamp(16px, 3vw, 36px);
+      white-space: nowrap;
+    }
+    .ps-nav-back {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(8px, 0.9vw, 11px); font-weight: 300;
+      letter-spacing: 0.35em; text-transform: uppercase;
+      color: rgba(150, 200, 255, 0.35);
+      background: transparent; border: none; cursor: pointer;
+      transition: color 0.3s ease; padding: 8px 16px;
+    }
+    .ps-nav-back:hover { color: #00B3BC; }
+
+    .ps-nav-info-fade { opacity: 0 !important; }
+
+    /* ── Panel 4: Case Study ────────────────────────────────────────────────── */
+    #ps-casestudy {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: clamp(14px, 2.5vh, 32px);
+      z-index: 5; background: rgba(0, 5, 18, 0.96);
+      opacity: 0; transition: opacity 0.8s ease; pointer-events: none;
+    }
+    #ps-casestudy.visible { opacity: 1; pointer-events: auto; }
+
+    .ps-cs-eyebrow {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(8px, 0.9vw, 11px); font-weight: 300;
+      letter-spacing: 0.5em; text-transform: uppercase;
+      color: rgba(100, 180, 255, 0.55);
+    }
+    .ps-cs-title {
+      font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(20px, 3.5vw, 48px); font-weight: 800;
+      letter-spacing: 0.18em; text-transform: uppercase; color: #d0e8ff;
+    }
+    .ps-cs-options {
+      display: flex; gap: clamp(16px, 3vw, 40px); margin-top: clamp(8px, 1.5vh, 20px);
+    }
+    .ps-cs-btn {
+      display: flex; flex-direction: column; align-items: center;
+      gap: 14px; background: transparent; cursor: pointer;
+      padding: clamp(18px, 3vh, 32px) clamp(24px, 4vw, 48px);
+      border: 1px solid rgba(0, 110, 116, 0.22);
+      transition: border-color 0.3s, background 0.3s;
+    }
+    .ps-cs-btn:hover {
+      border-color: rgba(0, 110, 116, 0.55);
+      background: rgba(0, 110, 116, 0.06);
+    }
+    .ps-cs-icon {
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* ── Video thumbnail ────────────────────────────── */
+    .ps-cs-thumb {
+      width: clamp(72px, 10vw, 110px);
+      height: clamp(50px, 7vw, 76px);
+      border-radius: 7px;
+      background-size: cover; background-position: center 20%;
+      background-color: rgba(255,255,255,0.06);
+      position: relative; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.55);
+    }
+    .ps-cs-play {
+      position: absolute; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.42);
+    }
+    .ps-cs-play::after {
+      content: '';
+      width: 0; height: 0;
+      border-top: 11px solid transparent;
+      border-bottom: 11px solid transparent;
+      border-left: 18px solid rgba(255,255,255,0.90);
+      margin-left: 4px;
+      filter: drop-shadow(0 0 5px rgba(255,255,255,0.4));
+    }
+
+    /* ── Phone icon ─────────────────────────────────── */
+    .ps-cs-phone {
+      width: clamp(32px, 4vw, 46px);
+      height: clamp(52px, 7vw, 74px);
+      border: 2px solid rgba(255,255,255,0.35);
+      border-radius: 11px; position: relative;
+      background: rgba(0,0,0,0.40); overflow: hidden;
+    }
+    .ps-cs-phone::before {
+      content: ''; position: absolute; top: 6px; left: 50%;
+      transform: translateX(-50%);
+      width: 14px; height: 3px;
+      background: rgba(255,255,255,0.25); border-radius: 2px;
+    }
+    .ps-cs-phone-screen {
+      position: absolute; top: 16px; left: 3px; right: 3px; bottom: 12px;
+      border-radius: 4px;
+      background: linear-gradient(135deg, rgba(0,180,200,0.25), rgba(0,60,80,0.5));
+      display: flex; flex-direction: column;
+      padding: 5px 4px 3px; gap: 3px; overflow: hidden;
+    }
+    .ps-cs-app-bar   { height: 5px; background: rgba(0,200,220,0.35); border-radius: 2px; }
+    .ps-cs-app-body  { flex: 1; display: flex; flex-direction: column; gap: 3px; padding-top: 2px; }
+    .ps-cs-app-line  { height: 3px; background: rgba(255,255,255,0.15); border-radius: 1px; }
+    .ps-cs-app-line.short { width: 60%; }
+    .ps-cs-phone-home {
+      position: absolute; bottom: 3px; left: 50%; transform: translateX(-50%);
+      width: 14px; height: 3px;
+      background: rgba(255,255,255,0.20); border-radius: 2px;
+    }
+
+    /* ── Gallery 2×2 grid ───────────────────────────── */
+    .ps-cs-gallery-grid {
+      width: clamp(52px, 7.5vw, 82px);
+      height: clamp(48px, 7vw, 76px);
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 3px; border-radius: 6px; overflow: hidden;
+    }
+    .ps-cs-gallery-cell {
+      background-size: cover; background-position: center;
+      background-color: rgba(255,255,255,0.06); border-radius: 2px;
+    }
+    .ps-cs-gallery-cell:nth-child(2) { opacity: 0.75; }
+    .ps-cs-gallery-cell:nth-child(3) { opacity: 0.60; }
+    .ps-cs-gallery-cell:nth-child(4) { opacity: 0.45; }
+    .ps-cs-label {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(8px, 0.85vw, 10px); font-weight: 300;
+      letter-spacing: 0.42em; text-transform: uppercase;
+      color: rgba(180, 220, 255, 0.55);
+    }
+    .ps-cs-back {
+      font-family: 'Lexend Giga', sans-serif;
+      font-size: clamp(8px, 0.9vw, 11px); font-weight: 300;
+      letter-spacing: 0.35em; text-transform: uppercase;
+      color: rgba(150, 200, 255, 0.35);
+      background: transparent; border: none; cursor: pointer;
+      transition: color 0.3s ease; padding: 8px 16px; margin-top: 8px;
+    }
+    .ps-cs-back:hover { color: #00B3BC; }
+  </style>
+</head>
+<body>
+  <div id="ps-bg"></div>
+  <canvas id="canvas-back"  class="ps-canvas"></canvas>
+
+  <!-- Panel 1: Start Experience -->
+  <div id="ps-start" class="ps-panel">
+    <p class="ps-eyebrow">Bangalore Experience Center</p>
+    <button id="ps-btn-start" class="ps-btn">Start Experience</button>
+    <p class="ps-hint">Touch to begin</p>
+  </div>
+
+  <!-- Panel 2: Enter Project Galaxy -->
+  <div id="ps-galaxy" class="ps-panel">
+    <p class="ps-eyebrow">Project Galaxy</p>
+    <p class="ps-heading">Click to enter<br>Project Galaxy</p>
+    <button id="ps-btn-enter" class="ps-btn">Enter</button>
+  </div>
+
+  <canvas id="canvas-front" class="ps-canvas"></canvas>
+
+  <!-- Panel 3: Project Galaxy Navigation (above canvases) -->
+  <div id="ps-nav">
+    <button class="ps-nav-arrow" id="ps-prev">&#8592;</button>
+
+    <div class="ps-nav-center">
+      <p class="ps-nav-kicker">Project</p>
+      <p class="ps-nav-counter" id="ps-counter">01 / 10</p>
+      <h2 class="ps-nav-title" id="ps-title">—</h2>
+      <p class="ps-nav-desc" id="ps-desc"></p>
+      <div class="ps-nav-tags" id="ps-tags"></div>
+      <button class="ps-nav-view-cta" id="ps-view-cta">View Case Study</button>
+      <div class="ps-nav-bottom">
+        <button class="ps-nav-back" id="ps-back">&#8592; Back to Galaxy</button>
+      </div>
+    </div>
+
+    <button class="ps-nav-arrow" id="ps-next">&#8594;</button>
+  </div>
+
+  <!-- Panel 4: Case Study options (Video / Prototype / Gallery) -->
+  <div id="ps-casestudy">
+    <p class="ps-cs-eyebrow">Case Study</p>
+    <h2 class="ps-cs-title" id="ps-cs-title">—</h2>
+    <div class="ps-cs-options">
+      <button class="ps-cs-btn" id="ps-cs-video">
+        <div class="ps-cs-icon">
+          <div class="ps-cs-thumb" id="ps-cs-thumb-img">
+            <div class="ps-cs-play"></div>
+          </div>
+        </div>
+        <span class="ps-cs-label">Video</span>
+      </button>
+      <button class="ps-cs-btn" id="ps-cs-proto">
+        <div class="ps-cs-icon">
+          <div class="ps-cs-phone">
+            <div class="ps-cs-phone-screen">
+              <div class="ps-cs-app-bar"></div>
+              <div class="ps-cs-app-body">
+                <div class="ps-cs-app-line"></div>
+                <div class="ps-cs-app-line short"></div>
+              </div>
+            </div>
+            <div class="ps-cs-phone-home"></div>
+          </div>
+        </div>
+        <span class="ps-cs-label">Prototype</span>
+      </button>
+      <button class="ps-cs-btn" id="ps-cs-gallery">
+        <div class="ps-cs-icon">
+          <div class="ps-cs-gallery-grid">
+            <div class="ps-cs-gallery-cell" id="ps-cs-gc1"></div>
+            <div class="ps-cs-gallery-cell" id="ps-cs-gc2"></div>
+            <div class="ps-cs-gallery-cell" id="ps-cs-gc3"></div>
+            <div class="ps-cs-gallery-cell" id="ps-cs-gc4"></div>
+          </div>
+        </div>
+        <span class="ps-cs-label">Gallery</span>
+      </button>
+    </div>
+    <button class="ps-cs-back" id="ps-cs-back">&#8592; Back to Project</button>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+  const SERVER_URL = localStorage.getItem('bec_server') || 'http://localhost:3001'
+
+  // ── CANVAS SETUP ──────────────────────────────────────────────────────────────
+  const W = window.innerWidth, H = window.innerHeight
+  const cvBack = document.getElementById('canvas-back')
+  const ctxB   = cvBack.getContext('2d')
+  cvBack.width = W; cvBack.height = H
+
+  // ── PARTICLE TUNNEL VORTEX ────────────────────────────────────────────────────
+  // Square particles in a 3D perspective tunnel.
+  // Additive blending ('lighter') makes overlapping teal squares bloom toward
+  // white/bright-teal at the vortex centre; trail persistence adds motion streaks.
+
+  // Teal palette centred on #006E74
+  const PALETTE = [
+    '#003D42','#004D52','#005B60',
+    '#006E74','#006E74','#006E74',   // weight toward the target hue
+    '#007A80','#008A92',
+  ]
+
+  const FOCAL     = 430
+  const ZFAR      = 920
+  const ZNEAR     = 68
+  const FADE_NEAR = ZNEAR * 4.0
+  const RING_R    = 255
+
+  const CX = W * 0.5, CY = H * 0.5
+
+
+  function newParticle(scatter) {
+    const angle = Math.random() * Math.PI * 2
+    const r     = RING_R * (0.65 + Math.random() * 0.70)
+    return {
+      angle,
+      r,
+      wz:       scatter
+                  ? ZNEAR + Math.random() * (ZFAR - ZNEAR)
+                  : ZFAR  * (0.70 + Math.random() * 0.30),
+      speed:    0.45 + Math.random() * 1.80,
+      spinRate: (Math.random() < 0.72 ? 1 : -1) * (0.0003 + Math.random() * 0.0010),
+      baseSz:   1.2 + Math.pow(Math.random(), 0.50) * 4.5,
+      rot:      Math.random() * Math.PI * 2,
+      rotV:     (Math.random() - 0.5) * 0.012,
+      alpha:    0.60 + Math.random() * 0.40,
+      color:    PALETTE[Math.floor(Math.random() * PALETTE.length)],
+    }
+  }
+
+  const particles = Array.from({ length: 2500 }, () => newParticle(true))
+
+  function drawFrame(ts) {
+    // Hard clear every frame — no trail accumulation, no haze
+    ctxB.clearRect(0, 0, W, H)
+
+    const camX = Math.sin(ts * 0.000168) * 44
+    const camY = Math.cos(ts * 0.000131) * 26
+
+    for (const p of particles) {
+      p.wz    -= p.speed
+      p.angle += p.spinRate
+      p.rot   += p.rotV
+
+      if (p.wz <= ZNEAR) { Object.assign(p, newParticle(false)); continue }
+
+      const scale  = FOCAL / p.wz
+      const wx     = p.r * Math.cos(p.angle)
+      const wy     = p.r * Math.sin(p.angle)
+      const sx     = CX + (wx - camX) * scale
+      const sy     = CY + (wy - camY) * scale
+      const drawSz = p.baseSz * scale
+      if (drawSz < 0.4) continue
+
+      const depthT   = 1 - (p.wz - ZNEAR) / (ZFAR - ZNEAR)
+      const nearFade = Math.min(1, Math.max(0, (p.wz - ZNEAR) / (FADE_NEAR - ZNEAR)))
+      // High base opacity so squares are solid and clear, not translucent
+      const finalAlpha = p.alpha * (0.20 + 0.80 * depthT) * nearFade
+      if (finalAlpha < 0.02) continue
+
+      // Snap sub-3px squares to pixel grid — eliminates sub-pixel blur
+      const px  = drawSz < 3 ? Math.round(sx) : sx
+      const py  = drawSz < 3 ? Math.round(sy) : sy
+      const cos = Math.cos(p.rot), sin = Math.sin(p.rot)
+
+      ctxB.globalAlpha = finalAlpha
+      ctxB.fillStyle   = p.color
+      ctxB.setTransform(cos, sin, -sin, cos, px, py)
+      ctxB.fillRect(-drawSz * 0.5, -drawSz * 0.5, drawSz, drawSz)
+    }
+
+    ctxB.globalAlpha = 1
+    ctxB.setTransform(1, 0, 0, 1, 0, 0)
+    requestAnimationFrame(drawFrame)
+  }
+  requestAnimationFrame(drawFrame)
+
+  // ── STATE ─────────────────────────────────────────────────────────────────────
+  let revealed = false, galaxyPromptShown = false, navShown = false
+  let _currentProjData = { img: '', gallery: [], video: '' }
+
+  function _refreshCaseStudyIcons() {
+    const { img, gallery, video } = _currentProjData
+
+    // Video: use YouTube thumbnail if URL present, else fall back to project image
+    let thumbUrl = img
+    if (video) {
+      const m = video.match(/(?:v=|youtu\.be\/)([^&?/]+)/)
+      if (m) thumbUrl = `https://img.youtube.com/vi/${m[1]}/mqdefault.jpg`
+    }
+    const thumb = document.getElementById('ps-cs-thumb-img')
+    if (thumb) thumb.style.backgroundImage = thumbUrl ? `url('${thumbUrl}')` : ''
+
+    // Gallery cells — fill with first 4 gallery images, fall back to project image
+    const imgs = gallery.length ? gallery : [img, img, img, img]
+    ;['ps-cs-gc1','ps-cs-gc2','ps-cs-gc3','ps-cs-gc4'].forEach((id, i) => {
+      const cell = document.getElementById(id)
+      if (cell) cell.style.backgroundImage = imgs[i] ? `url('${imgs[i]}')` : ''
+    })
+  }
+
+  function reveal() {
+    if (revealed) return; revealed = true
+    document.getElementById('ps-bg').classList.add('visible')
+    cvBack.classList.add('visible')
+    // Slam all particles to the far end of the tunnel — burst rushes at viewer
+    particles.forEach(p => { p.wz = ZFAR * (0.80 + Math.random() * 0.20) })
+    // Button fades in after the initial wave clears the centre
+    setTimeout(() => document.getElementById('ps-start').classList.add('visible'), 1200)
+  }
+
+  function showGalaxyPrompt() {
+    if (galaxyPromptShown) return; galaxyPromptShown = true
+    const startEl = document.getElementById('ps-start')
+    startEl.style.transition = 'opacity 0.6s ease, transform 0.6s ease'
+    startEl.classList.remove('visible')
+    setTimeout(() => document.getElementById('ps-galaxy').classList.add('visible'), 400)
+  }
+
+  function _setNavContent(data) {
+    document.getElementById('ps-counter').textContent =
+      String(data.idx + 1).padStart(2, '0') + ' / ' + String(data.total).padStart(2, '0')
+    document.getElementById('ps-title').textContent = data.title
+    document.getElementById('ps-desc').textContent  = data.description
+    document.getElementById('ps-tags').innerHTML    = data.tags.map(t =>
+      `<span class="ps-nav-tag">${t}</span>`).join('')
+    if (data.img !== undefined) {
+      _currentProjData = { img: data.img || '', gallery: data.gallery || [], video: data.video || '' }
+      _refreshCaseStudyIcons()
+    }
+  }
+
+  function showNavPanel(data) {
+    _setNavContent(data)
+    if (navShown) return   // content updated; panel already visible
+    navShown = true
+    galaxyPromptShown = true
+    // Fade out particles and the Enter panel
+    cvBack.style.transition = 'opacity 0.6s ease'; cvBack.style.opacity = '0'
+    const gEl = document.getElementById('ps-galaxy')
+    gEl.style.transition = 'opacity 0.5s ease'; gEl.style.opacity = '0'; gEl.style.pointerEvents = 'none'
+    document.getElementById('ps-start').style.opacity = '0'; document.getElementById('ps-start').style.pointerEvents = 'none'
+    setTimeout(() => document.getElementById('ps-nav').classList.add('visible'), 300)
+  }
+
+  function updateNavInfo(data) {
+    if (!navShown) { showNavPanel(data); return }  // nav not visible yet — trigger full show
+    const els = ['ps-title', 'ps-desc', 'ps-tags', 'ps-counter']
+    els.forEach(id => document.getElementById(id).classList.add('ps-nav-info-fade'))
+    setTimeout(() => {
+      _setNavContent(data)
+      els.forEach(id => document.getElementById(id).classList.remove('ps-nav-info-fade'))
+    }, 280)
+  }
+
+  function hideNavPanel() {
+    navShown = false; galaxyPromptShown = true
+    document.getElementById('ps-nav').classList.remove('visible')
+    document.getElementById('ps-casestudy').classList.remove('visible')
+    setTimeout(() => {
+      cvBack.style.transition = 'opacity 0.8s ease'; cvBack.style.opacity = '1'
+      document.getElementById('ps-galaxy').style.opacity = ''
+      document.getElementById('ps-galaxy').style.pointerEvents = ''
+      document.getElementById('ps-galaxy').classList.add('visible')
+    }, 400)
+  }
+
+  let _csCurTitle = ''
+  function showCaseStudy(title) {
+    _csCurTitle = title || document.getElementById('ps-title').textContent
+    document.getElementById('ps-cs-title').textContent = _csCurTitle
+    document.getElementById('ps-nav').classList.remove('visible')
+    document.getElementById('ps-casestudy').classList.add('visible')
+  }
+
+  function hideCaseStudy() {
+    document.getElementById('ps-casestudy').classList.remove('visible')
+    document.getElementById('ps-nav').classList.add('visible')
+  }
+
+  // ── SOCKET ────────────────────────────────────────────────────────────────────
+  const socket = io(SERVER_URL, { reconnection: true, reconnectionDelayMax: 5000, reconnectionAttempts: Infinity })
+  socket.on('connect', () => { socket.emit('register', { role: 'podium' }) })
+  socket.on('msg', msg => {
+    if (msg.fn === 'personDetected')   reveal()
+    if (msg.fn === 'galaxyReady')      showGalaxyPrompt()
+    if (msg.fn === 'galaxyEntered')    showNavPanel(msg.args[0])
+    if (msg.fn === 'projectChanged')   updateNavInfo(msg.args[0])
+    if (msg.fn === 'galaxyExited')     hideNavPanel()
+    if (msg.fn === 'caseStudyClosed')  hideCaseStudy()
+  })
+
+  window.addEventListener('storage', e => {
+    if (e.key === 'bec_personDetected')  reveal()
+    if (e.key === 'bec_galaxyReady')     showGalaxyPrompt()
+    if (e.key === 'bec_galaxyEntered' && e.newValue)  showNavPanel(JSON.parse(e.newValue))
+    if (e.key === 'bec_projectChanged' && e.newValue) updateNavInfo(JSON.parse(e.newValue))
+    if (e.key === 'bec_galaxyExited')    hideNavPanel()
+    if (e.key === 'bec_caseStudyClosed') hideCaseStudy()
+  })
+
+
+  // ── BUTTONS ───────────────────────────────────────────────────────────────────
+  document.getElementById('ps-btn-start').addEventListener('click', () => {
+    // Clear any galaxy state from a previous session
+    ;['bec_galaxyEntered','bec_galaxyExited','bec_galaxyReady','bec_projectChanged'].forEach(k => localStorage.removeItem(k))
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'showGalaxy', args: [] })
+    localStorage.setItem('bec_showGalaxy', String(Date.now()))
+    const startEl = document.getElementById('ps-start')
+    startEl.style.transition = 'opacity 0.5s ease'
+    startEl.style.opacity    = '0'; startEl.style.pointerEvents = 'none'
+  })
+
+  document.getElementById('ps-btn-enter').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'enterGalaxy', args: [] })
+    localStorage.setItem('bec_enterGalaxy', String(Date.now()))
+    const gEl = document.getElementById('ps-galaxy')
+    gEl.style.transition = 'opacity 0.5s ease'
+    gEl.style.opacity = '0'; gEl.style.pointerEvents = 'none'
+  })
+
+  document.getElementById('ps-view-cta').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'viewCaseStudy', args: [] })
+    localStorage.setItem('bec_viewCaseStudy', String(Date.now()))
+    showCaseStudy()
+  })
+
+  // Case study panel buttons
+  document.getElementById('ps-cs-video').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'openVideo', args: [] })
+    localStorage.setItem('bec_openVideo', String(Date.now()))
+  })
+  document.getElementById('ps-cs-proto').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'openProto', args: [] })
+    localStorage.setItem('bec_openProto', String(Date.now()))
+  })
+  document.getElementById('ps-cs-gallery').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'openGallery', args: [] })
+    localStorage.setItem('bec_openGallery', String(Date.now()))
+  })
+  document.getElementById('ps-cs-back').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'backToOverview', args: [] })
+    localStorage.setItem('bec_backToOverview', String(Date.now()))
+    hideCaseStudy()
+  })
+
+  document.getElementById('ps-prev').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'podiumPrev', args: [] })
+    localStorage.setItem('bec_podiumPrev', String(Date.now()))
+  })
+
+  document.getElementById('ps-next').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'podiumNext', args: [] })
+    localStorage.setItem('bec_podiumNext', String(Date.now()))
+  })
+
+  document.getElementById('ps-back').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'podiumBack', args: [] })
+    localStorage.setItem('bec_podiumBack', String(Date.now()))
+    hideNavPanel()
+  })
+  </script>
+</body>
+</html>
