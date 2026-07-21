@@ -54,9 +54,14 @@
     }
 
     /* ── GALLERY LOOP ───────────────────────────────────────────────────────── */
+    /* The actual gallery — a ring of real GLB cube meshes (public/cube.glb,
+       the same model used for the project cards on the projector screen) —
+       renders as WebGL geometry on #tv-canvas itself (see the gal* code
+       below). This DOM layer only holds the transparent bloom wash and the
+       title/description text panel on top of it. */
     #gallery-loop {
       position: fixed; inset: 0; z-index: 20;
-      background: #05101E;
+      background: transparent;
       display: flex; flex-direction: column; align-items: center;
       opacity: 0; pointer-events: none;
       transition: opacity 0.8s ease;
@@ -68,51 +73,18 @@
       content: '';
       position: absolute; inset: -30%;
       background:
-        radial-gradient(ellipse 60% 55% at 50% 45%, rgba(2,16,38,0.9) 0%, transparent 60%),
-        radial-gradient(ellipse 45% 40% at 30% 40%, rgba(0,40,80,0.3) 0%, transparent 65%),
-        radial-gradient(ellipse 40% 45% at 70% 55%, rgba(0,60,90,0.3) 0%, transparent 65%);
+        radial-gradient(ellipse 60% 55% at 50% 45%, rgba(2,16,38,0.55) 0%, transparent 60%),
+        radial-gradient(ellipse 45% 40% at 30% 40%, rgba(0,40,80,0.2) 0%, transparent 65%),
+        radial-gradient(ellipse 40% 45% at 70% 55%, rgba(0,60,90,0.2) 0%, transparent 65%);
       filter: blur(55px);
       pointer-events: none; z-index: 0;
     }
 
+    /* Empty spacer — reserves the top 60% for the WebGL cube ring so
+       #gl-info (below) sits in the bottom 40% without overlapping it. */
     #gl-stage {
       position: relative; width: 100%; flex: 0 0 60%;
-      perspective: 900px;
       z-index: 1;
-    }
-
-    .gl-card {
-      position: absolute; top: 50%; left: 50%;
-      width: clamp(200px, 28vw, 320px);
-      height: clamp(130px, 18vw, 210px);
-      margin-top: -clamp(65px, 9vw, 105px);
-      margin-left: -clamp(100px, 14vw, 160px);
-      transition: transform 0.55s cubic-bezier(.4,0,.2,1), opacity 0.55s ease, filter 0.55s ease;
-      transform-style: preserve-3d;
-    }
-    .gl-card-inner {
-      width: 100%; height: 100%;
-      border-radius: 6px; overflow: hidden;
-      border: 1px solid rgba(255,255,255,0.12);
-      box-shadow:
-        0 6px 28px rgba(0,0,0,0.7),
-        0 0 0 1px rgba(255,255,255,0.04),
-        inset 0 0 0 1px rgba(255,255,255,0.06);
-      background: rgba(5,16,30,0.9);
-    }
-    .gl-card-inner img { width: 100%; height: 100%; object-fit: cover; display: block; }
-
-    .gl-card.pos-0  { transform: translateX(0)     translateZ(0px)    scale(1);    opacity: 1;    filter: brightness(1); }
-    .gl-card.pos-1  { transform: translateX(46vw)  translateZ(-180px) scale(0.68); opacity: 0.55; filter: brightness(0.6); }
-    .gl-card.pos-n1 { transform: translateX(-46vw) translateZ(-180px) scale(0.68); opacity: 0.55; filter: brightness(0.6); }
-    .gl-card.pos-2  { transform: translateX(76vw)  translateZ(-300px) scale(0.48); opacity: 0.28; filter: brightness(0.4); }
-    .gl-card.pos-n2 { transform: translateX(-76vw) translateZ(-300px) scale(0.48); opacity: 0.28; filter: brightness(0.4); }
-    .gl-card.hidden { transform: translateX(0)     translateZ(-420px) scale(0.3);  opacity: 0;    pointer-events: none; }
-
-    .gl-card.pos-0 .gl-card-inner { animation: gl-float 3.8s ease-in-out infinite; }
-    @keyframes gl-float {
-      0%, 100% { transform: translateY(0); }
-      50%       { transform: translateY(-14px); }
     }
 
     #gl-info {
@@ -181,11 +153,13 @@
     </div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@0.1.1675465747/selfie_segmentation.js" crossorigin="anonymous"></script>
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
-  <script>
+  <script type="module">
+  import * as THREE from 'three'
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'
+
   const PROJECTS = [
     { title: 'OLAM',      img: '/images/olam.png',     tags: ['MARKET', 'BRAND IDENTITY'],          description: 'A landmark brand experience connecting global agriculture with a modern identity rooted in purpose and place.' },
     { title: 'INFOSYS',   img: '/images/infosys.jpg',  tags: ['DIGITAL EXPERIENCE', 'UX DESIGN'],   description: 'An immersive digital experience center that translates enterprise technology into human-centered narratives.' },
@@ -199,6 +173,8 @@
     { title: 'RELIANCE',  img: '/images/olam.png',     tags: ['RETAIL', 'DIGITAL TRANSFORMATION'],  description: 'Transforming retail at scale — a phygital experience that reimagines how millions of Indians discover and buy.' },
   ]
 
+  const _serverParam = new URLSearchParams(location.search).get('server')
+  if (_serverParam) localStorage.setItem('bec_server', _serverParam)
   const SERVER_URL   = localStorage.getItem('bec_server') || 'http://localhost:3001'
   const STABLE_MS    = 2000
   const RING_FORM_MS = 1400
@@ -294,32 +270,114 @@
   const glowTX = new Float32Array(GLOW_N), glowTY = new Float32Array(GLOW_N)
   const rPhase = Float32Array.from({ length: RING_N }, () => (Math.random()-0.5)*0.3)
 
-  // ── GALLERY LOOP ─────────────────────────────────────────────────────────────
-  let _galIdx = 0, _galCards = [], _galAdvTimer = null
+  // ── GALLERY LOOP — real GLB cube carousel ──────────────────────────────────────
+  // Same cube.glb model + technique as createProjMesh() in src/main.js (the
+  // project cards on the projector screen): the GLB shape cloned per project,
+  // scaled to a fixed size, with a front-face plane carrying a CanvasTexture
+  // of the project image. Genuine WebGL geometry — not a DOM/CSS approximation
+  // — so there's no edge-on warping; a real cube just shows its side/back
+  // like a cube should. The cubes sit in a ring that slowly auto-rotates;
+  // whichever cube is nearest the camera drives the title/description panel.
+  const GL_RING_R    = 3.5
+  const GL_CUBE_SIZE = 1.35
+  const GL_ROT_SPEED = 0.0026   // rad/frame
+  const GL_ACTIVE_SCALE = 1.2
+
+  let _cubeGLBScene   = null
+  const _cubeGLBQueue = []
+  new GLTFLoader().load('/cube.glb', gltf => {
+    _cubeGLBScene = gltf.scene
+    _cubeGLBQueue.forEach(fn => fn(gltf.scene))
+    _cubeGLBQueue.length = 0
+  })
+
+  const galScene = new THREE.Scene()
+  const galCam   = new THREE.PerspectiveCamera(42, W / H, 0.1, 60)
+  galCam.position.set(0, 0, GL_RING_R + 4.6)
+  galCam.lookAt(0, 0, 0)
+
+  galScene.add(new THREE.AmbientLight(0xffffff, 0.55))
+  const galKey = new THREE.DirectionalLight(0xbfe9ff, 1.1)
+  galKey.position.set(3, 5, 6)
+  galScene.add(galKey)
+  const galFill = new THREE.DirectionalLight(0x2050ff, 0.4)
+  galFill.position.set(-4, -2, 3)
+  galScene.add(galFill)
+
+  const galRing = new THREE.Group()
+  galRing.position.y = 1.05   // lifts the ring into the top 60% of the frame,
+  galScene.add(galRing)       // clear of the #gl-info text panel below
+
+  const galProjTexLoader = new THREE.TextureLoader()
+  let _galCubes = []   // { group, angle }
+  let _galBuilt = false
+  let _galRotY  = 0
+  let _galActiveIdx = -1
   let _galEl = null, _glInfo = null, _glTitle = null, _glDesc = null, _glTags = null, _glDots = null
 
-  function _buildGallery() {
+  function _buildGalCubes() {
     _galEl   = document.getElementById('gallery-loop')
     _glInfo  = document.getElementById('gl-info')
     _glTitle = document.getElementById('gl-title')
     _glDesc  = document.getElementById('gl-desc')
     _glTags  = document.getElementById('gl-tags')
     _glDots  = document.getElementById('gl-dots')
-    const stage = document.getElementById('gl-stage')
 
-    PROJECTS.forEach(p => {
-      const outer = document.createElement('div')
-      outer.className = 'gl-card hidden'
-      const inner = document.createElement('div')
-      inner.className = 'gl-card-inner'
-      if (p.img) {
-        const img = document.createElement('img')
-        img.src = p.img; img.alt = p.title
-        inner.appendChild(img)
+    const n = PROJECTS.length
+
+    PROJECTS.forEach((p, i) => {
+      const angle = (i / n) * Math.PI * 2
+      const group = new THREE.Group()
+
+      const applyGLB = (glbScene) => {
+        const clone = glbScene.clone(true)
+        const bbox  = new THREE.Box3().setFromObject(clone)
+        const dim   = bbox.getSize(new THREE.Vector3())
+        const sc    = GL_CUBE_SIZE / Math.max(dim.x, dim.y, dim.z)
+        clone.scale.setScalar(sc)
+        const ctr = bbox.getCenter(new THREE.Vector3())
+        clone.position.set(-ctr.x * sc, -ctr.y * sc, -ctr.z * sc)
+        clone.traverse(child => {
+          if (!child.isMesh) return
+          const mats = Array.isArray(child.material) ? child.material : [child.material]
+          mats.forEach(m => { if (m.color) m.color.set('#0b3a42') })
+        })
+        group.add(clone)
       }
-      outer.appendChild(inner)
-      stage.appendChild(outer)
-      _galCards.push(outer)
+      if (_cubeGLBScene) applyGLB(_cubeGLBScene)
+      else _cubeGLBQueue.push(applyGLB)
+
+      // Front-face plane — project image baked into a square CanvasTexture,
+      // identical technique to createProjMesh()'s frontTex in main.js.
+      const cvs = document.createElement('canvas')
+      cvs.width = cvs.height = 512
+      const ctx = cvs.getContext('2d')
+      ctx.fillStyle = '#0b3a42'
+      ctx.fillRect(0, 0, 512, 512)
+      const tex = new THREE.CanvasTexture(cvs)
+      tex.colorSpace = THREE.SRGBColorSpace
+      const mat   = new THREE.MeshBasicMaterial({ map: tex })
+      const plane = new THREE.Mesh(new THREE.PlaneGeometry(GL_CUBE_SIZE * 0.98, GL_CUBE_SIZE * 0.98), mat)
+      plane.position.set(0, 0, GL_CUBE_SIZE / 2 + 0.01)
+      group.add(plane)
+
+      if (p.img) {
+        galProjTexLoader.load(p.img, t => {
+          t.colorSpace = THREE.SRGBColorSpace
+          const img = t.image
+          const s   = Math.min(img.naturalWidth || img.width, img.naturalHeight || img.height)
+          ctx.clearRect(0, 0, 512, 512)
+          ctx.drawImage(img, (img.naturalWidth - s) / 2, (img.naturalHeight - s) / 2, s, s, 0, 0, 512, 512)
+          tex.needsUpdate = true
+          t.dispose()
+        })
+      }
+
+      group.position.set(Math.sin(angle) * GL_RING_R, 0, Math.cos(angle) * GL_RING_R)
+      group.rotation.y = angle
+      group.userData.targetScale = 1
+      galRing.add(group)
+      _galCubes.push({ group, angle })
     })
 
     PROJECTS.forEach(() => {
@@ -327,26 +385,13 @@
       dot.className = 'gl-dot'
       _glDots.appendChild(dot)
     })
-  }
 
-  function _applyGalleryPositions() {
-    const n = PROJECTS.length
-    _galCards.forEach((card, i) => {
-      const diff = ((i - _galIdx + n) % n)
-      let cls = 'hidden'
-      if      (diff === 0)     cls = 'pos-0'
-      else if (diff === 1)     cls = 'pos-1'
-      else if (diff === n - 1) cls = 'pos-n1'
-      else if (diff === 2)     cls = 'pos-2'
-      else if (diff === n - 2) cls = 'pos-n2'
-      card.className = `gl-card ${cls}`
-    })
-    _glDots.querySelectorAll('.gl-dot').forEach((d, i) => d.classList.toggle('active', i === _galIdx))
+    _galBuilt = true
   }
 
   function _updateGalleryInfo(fade) {
     const apply = () => {
-      const p = PROJECTS[_galIdx]
+      const p = PROJECTS[_galActiveIdx]
       _glTitle.textContent = p.title
       _glDesc.textContent  = p.description
       _glTags.innerHTML    = p.tags.map(t => `<span class="gl-tag">${t}</span>`).join('')
@@ -356,25 +401,43 @@
     else apply()
   }
 
-  function _galleryAdvance() {
-    _galIdx = (_galIdx + 1) % PROJECTS.length
-    _applyGalleryPositions()
-    _updateGalleryInfo(true)
+  function _glTick() {
+    _galRotY += GL_ROT_SPEED
+    galRing.rotation.y = _galRotY
+
+    // Whichever cube is angularly closest to the camera (angle ≈ 0) is "active"
+    let bestI = 0, bestD = Infinity
+    _galCubes.forEach((c, i) => {
+      let eff = (c.angle + _galRotY) % (Math.PI * 2)
+      if (eff > Math.PI) eff -= Math.PI * 2
+      if (eff < -Math.PI) eff += Math.PI * 2
+      const d = Math.abs(eff)
+      if (d < bestD) { bestD = d; bestI = i }
+    })
+    if (bestI !== _galActiveIdx) {
+      _galActiveIdx = bestI
+      _galCubes.forEach((c, i) => { c.group.userData.targetScale = i === bestI ? GL_ACTIVE_SCALE : 1 })
+      _glDots.querySelectorAll('.gl-dot').forEach((d, i) => d.classList.toggle('active', i === bestI))
+      _updateGalleryInfo(true)
+    }
+
+    _galCubes.forEach(c => {
+      const ts = c.group.userData.targetScale
+      const ns = c.group.scale.x + (ts - c.group.scale.x) * 0.08
+      c.group.scale.setScalar(ns)
+    })
   }
 
   function showGallery() {
-    if (!_galEl) _buildGallery()
-    _galIdx = 0
-    _applyGalleryPositions()
-    _updateGalleryInfo(false)
+    if (!_galBuilt) _buildGalCubes()
+    _galRotY = 0
+    _galActiveIdx = -1
+    galRing.rotation.y = 0
     _galEl.classList.add('visible')
-    if (_galAdvTimer) clearInterval(_galAdvTimer)
-    _galAdvTimer = setInterval(_galleryAdvance, 3500)
   }
 
   function hideGallery() {
     if (_galEl) _galEl.classList.remove('visible')
-    if (_galAdvTimer) { clearInterval(_galAdvTimer); _galAdvTimer = null }
   }
 
   function go(s) {
@@ -567,6 +630,15 @@
     pBar.style.width = `${(handMs / HAND_HOLD_MS) * 100}%`
 
     renderer.render(scene, cam)
+
+    // ── Gallery cube ring — layered on top, only while looping ──────────────
+    if (state === 'COOLDOWN') {
+      _glTick()
+      renderer.autoClear = false
+      renderer.clearDepth()
+      renderer.render(galScene, galCam)
+      renderer.autoClear = true
+    }
   }
 
   requestAnimationFrame(animate)

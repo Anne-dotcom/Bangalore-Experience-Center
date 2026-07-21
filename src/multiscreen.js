@@ -8,9 +8,9 @@ import { io } from 'socket.io-client'
 
 export const ROLE = new URLSearchParams(window.location.search).get('role') || null
 
-const SERVER_URL = new URLSearchParams(window.location.search).get('server')
-               || localStorage.getItem('bec_server')
-               || 'http://localhost:3001'
+const _serverParam = new URLSearchParams(window.location.search).get('server')
+if (_serverParam) localStorage.setItem('bec_server', _serverParam)
+const SERVER_URL = localStorage.getItem('bec_server') || 'http://localhost:3001'
 
 // Any page without an explicit role registers as 'projector' so that plain
 // http://localhost:5173 responds to showGalaxy without needing a URL param.

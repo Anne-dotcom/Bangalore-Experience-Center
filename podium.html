@@ -388,6 +388,8 @@
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script>
+  const _serverParam = new URLSearchParams(location.search).get('server')
+  if (_serverParam) localStorage.setItem('bec_server', _serverParam)
   const SERVER_URL = localStorage.getItem('bec_server') || 'http://localhost:3001'
 
   // ── CANVAS SETUP ──────────────────────────────────────────────────────────────
