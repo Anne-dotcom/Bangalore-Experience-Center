@@ -223,9 +223,11 @@ let shadowReceiverMesh  = null   // ShadowMaterial plane behind project planes
 let projOverviewEl    = null   // #project-overview-screen DOM element
 let projOverviewIdx   = -1     // project index currently shown in overview
 let _hiddenProjMesh   = null   // particle mesh hidden while overview is open
-let _projCubeSpinning = false  // true while the open-overview spin is in progress
+let _projCubeSpinning = false  // true while the open/close overview spin is in progress
 let _pendingMediaAction = null // 'video'|'proto'|'gallery' — queued while cube still spinning
-let _pendingGalaxyExit = false  // true when podiumBack arrives while cube-close animation is running
+let _pendingGalaxyExit = false  // true when podiumBack arrives while the overview cube-spin (open or close) is running — consumed by whichever of openProjectOverview/closeProjectOverview finishes next
+let _subCubeSpinning = false   // true while a video/proto/gallery sub-screen cube-flip (openWithCube/closeWithCube) is in progress
+let _pendingSubAction = null   // fn queued to run once the current sub-screen cube-flip finishes (e.g. a "back" pressed mid-open)
 let bandOverlayEl   = null   // #band-overlay — the 4-band wipe transition element
 let textOverlayCanvas = null
 let textOverlayCtx    = null
@@ -1850,6 +1852,11 @@ function openProjectOverview(idx) {
       createAndShowProjectOverview(idx)
       const ovEl = projOverviewEl
       if (ovEl) setTimeout(() => { if (ovEl) ovEl.classList.add('ov-split') }, 180)
+      // "Back to Galaxy" arrived while the open spin was still running — it
+      // was queued instead of racing this animation; honor it now that the
+      // overview has actually finished opening, so the close plays its own
+      // proper reverse cube animation instead of being silently dropped.
+      if (_pendingGalaxyExit) { _pendingGalaxyExit = false; closeProjectOverview() }
     }
   })
 }
@@ -2311,6 +2318,7 @@ function openWithCube(screenEl, triggerEl) {
     return d
   })()
 
+  _subCubeSpinning = true
   _cubeFlip({
     outEl, inEl: screenEl,
     outTex: _makeOverviewTex(projOverviewIdx >= 0 ? projOverviewIdx : 0),
@@ -2326,6 +2334,10 @@ function openWithCube(screenEl, triggerEl) {
         ovEl.style.transition    = ''
         document.body.appendChild(ovEl)
       }
+      _subCubeSpinning = false
+      // A "back" request that arrived mid-open was queued instead of racing
+      // this animation — run it now that the screen has actually finished opening.
+      if (_pendingSubAction) { const fn = _pendingSubAction; _pendingSubAction = null; fn() }
     }
   })
 }
@@ -2442,6 +2454,7 @@ function closeWithCube(screenEl, onDone) {
     return d
   })()
 
+  _subCubeSpinning = true
   _cubeFlip({
     outEl: screenEl, inEl,
     outTex: _makeScreenTex(screenEl, projOverviewIdx >= 0 ? projOverviewIdx : 0),
@@ -2454,7 +2467,9 @@ function closeWithCube(screenEl, onDone) {
         document.body.appendChild(ovEl)
       }
       screenEl.remove()
+      _subCubeSpinning = false
       if (onDone) onDone()
+      if (_pendingSubAction) { const fn = _pendingSubAction; _pendingSubAction = null; fn() }
     }
   })
 }
@@ -2511,7 +2526,7 @@ function closeProjectOverview() {
 let videoScreenEl = null
 
 function openVideoScreen(idx, triggerEl) {
-  if (videoScreenEl) return
+  if (videoScreenEl || _subCubeSpinning) return
   const d = PROJECT_CARD_DATA[idx]
 
   const videoSrc = d.video || ''
@@ -2546,6 +2561,11 @@ function openVideoScreen(idx, triggerEl) {
 
 function closeVideoScreen() {
   if (!videoScreenEl) return
+  // The open cube-flip is still spinning — queue the close instead of
+  // racing a second _cubeFlip on top of it (that corrupted the DOM: the
+  // open's delayed onDone would re-insert this screen and re-hide the
+  // overview after the close had already restored it).
+  if (_subCubeSpinning) { _pendingSubAction = closeVideoScreen; return }
   const el = videoScreenEl
   videoScreenEl = null
   el.querySelectorAll('video, iframe').forEach(m => {
@@ -2635,7 +2655,7 @@ function generateFakeApp(d) {
 }
 
 function openProtoScreen(idx, triggerEl) {
-  if (protoScreenEl) return
+  if (protoScreenEl || _subCubeSpinning) return
   const d = PROJECT_CARD_DATA[idx]
   const highlights = PROTO_HIGHLIGHTS[d.title] || PROTO_HIGHLIGHTS.OLAM
 
@@ -2683,6 +2703,7 @@ function openProtoScreen(idx, triggerEl) {
 
 function closeProtoScreen() {
   if (!protoScreenEl) return
+  if (_subCubeSpinning) { _pendingSubAction = closeProtoScreen; return }
   const el = protoScreenEl
   protoScreenEl = null
   el.querySelectorAll('iframe').forEach(f => { f.src = '' })
@@ -2701,7 +2722,7 @@ const GS_RADIUS  = 320   // sphere radius px
 const GS_HOLD_MS = 900   // hold duration to reveal grid
 
 function openGalleryScreen(idx, triggerEl) {
-  if (galleryScreenEl) return
+  if (galleryScreenEl || _subCubeSpinning) return
   const d = PROJECT_CARD_DATA[idx]
 
   // 20 cards: cycle through project gallery images
@@ -2885,6 +2906,7 @@ function gsReturnToSphere(cards, sphere, holdWrap) {
 
 function closeGalleryScreen() {
   if (!galleryScreenEl) return
+  if (_subCubeSpinning) { _pendingSubAction = closeGalleryScreen; return }
   cancelAnimationFrame(gsAnimId)
   if (gsHoldTimer) { clearTimeout(gsHoldTimer); gsHoldTimer = null }
   const el = galleryScreenEl
@@ -3511,6 +3533,13 @@ function navigateProjectOverview(dir) {
   activeProjIdx   = newIdx
   lastActiveIdx   = newIdx
 
+  // Keep the podium's case-study panel (title, video/proto/gallery thumbnails)
+  // in sync when navigation is driven by its prev/next buttons.
+  const _dNav = PROJECT_CARD_DATA[newIdx]
+  const _pdNav = { idx: newIdx, total: N, title: _dNav.title, description: _dNav.description, tags: _dNav.tags, img: _dNav.img, gallery: (_dNav.gallery || []).slice(0, 4), video: _dNav.video || '' }
+  send('podium', 'projectChanged', [_pdNav])
+  localStorage.setItem('bec_projectChanged', JSON.stringify(_pdNav))
+
   newEl.querySelector('#ov-back-btn')?.addEventListener('click', closeProjectOverview)
   bindIconBtns(newIdx)
   newEl.querySelectorAll('.tracker-item').forEach(item => {
@@ -3917,23 +3946,32 @@ if (ROLE === 'projector' || !ROLE) {
     if (typeof idx === 'number') transitionToProject(idx, idx > activeProjIdx ? 1 : -1)
   })
 
-  // Podium navigation controls
-  onMessage('podiumNext', () => {
+  // Podium navigation controls — dir is +1 (next) or -1 (prev). Routes to
+  // whichever level is actually open: the project overview/description page
+  // (if one is showing) or the galaxy card carousel otherwise. Previously
+  // this always drove the galaxy's transitionToProject even while the
+  // overview was open, which silently desynced projOverviewIdx from
+  // activeProjIdx and had no visible effect on the overview page.
+  function _podiumNav(dir) {
+    if (projOverviewEl) { navigateProjectOverview(dir); return }
     if (!galaxyActive) return
     const N = PROJECT_CARD_DATA.length
-    transitionToProject((activeProjIdx + 1) % N, 1)
-  })
-  onMessage('podiumPrev', () => {
-    if (!galaxyActive) return
-    const N = PROJECT_CARD_DATA.length
-    transitionToProject((activeProjIdx - 1 + N) % N, -1)
-  })
+    transitionToProject((activeProjIdx + dir + N) % N, dir)
+  }
+
+  onMessage('podiumNext', () => _podiumNav(1))
+  onMessage('podiumPrev', () => _podiumNav(-1))
   onMessage('podiumBack', () => {
     // "Back to Galaxy" on the podium closes the project overview and returns to the
     // galaxy view (cube spins back, all cubes stay visible).  It does NOT exit the
     // galaxy — exitGalaxyToDisc() is only called when there is no overview open.
     if (projOverviewEl) {
       closeProjectOverview()
+    } else if (_projCubeSpinning) {
+      // Overview cube is still mid-spin (opening or closing) — queue it so the
+      // reverse animation actually plays instead of being dropped by
+      // closeProjectOverview's own re-entrancy guard.
+      _pendingGalaxyExit = true
     } else if (galaxyActive) {
       exitGalaxyToDisc()
     }
@@ -3967,17 +4005,13 @@ if (ROLE === 'projector' || !ROLE) {
     // overview is already visible underneath if none of the above were open
   })
   window.addEventListener('storage', e => {
-    if (e.key === 'bec_podiumNext' && galaxyActive) {
-      const N = PROJECT_CARD_DATA.length
-      transitionToProject((activeProjIdx + 1) % N, 1)
-    }
-    if (e.key === 'bec_podiumPrev' && galaxyActive) {
-      const N = PROJECT_CARD_DATA.length
-      transitionToProject((activeProjIdx - 1 + N) % N, -1)
-    }
+    if (e.key === 'bec_podiumNext') _podiumNav(1)
+    if (e.key === 'bec_podiumPrev') _podiumNav(-1)
     if (e.key === 'bec_podiumBack') {
       if (projOverviewEl) {
         closeProjectOverview()
+      } else if (_projCubeSpinning) {
+        _pendingGalaxyExit = true
       } else if (galaxyActive) {
         exitGalaxyToDisc()
       }

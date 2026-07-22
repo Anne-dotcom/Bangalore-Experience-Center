@@ -49,6 +49,39 @@
     }
     @keyframes word-pulse { from { opacity: 0.85; } to { opacity: 1; } }
 
+    /* ── Camera-fallback button ─────────────────────────────────────────────── */
+    /* Shown only while no webcam is available, so the demo can still be
+       started manually via the TV remote's OK/select button instead of the
+       hand-raise gesture. */
+    #cam-fallback-btn {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 30;
+      font-family: 'Lexend Zetta', sans-serif;
+      font-size: clamp(28px, 4.5vw, 52px); font-weight: 800;
+      letter-spacing: 0.24em; text-transform: uppercase;
+      color: #00C8D5; background: transparent;
+      border: 2px solid rgba(0,200,213,0.45); border-radius: 8px;
+      padding: clamp(20px, 3vh, 34px) clamp(40px, 6vw, 84px);
+      text-shadow: 0 0 24px rgba(0,200,213,0.6);
+      cursor: pointer; outline: none;
+      opacity: 0; pointer-events: none;
+      transition: opacity 0.5s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+    /* Pulse animation only runs while actually shown — scoped to .visible so
+       it can't keep driving opacity back up after the button is hidden
+       (an unconditional `animation` here would override `opacity: 0` above
+       forever, since the keyframes set opacity on every tick regardless of
+       the base rule). */
+    #cam-fallback-btn.visible {
+      opacity: 1; pointer-events: auto;
+      animation: word-pulse 2.4s ease-in-out infinite;
+    }
+    #cam-fallback-btn:focus, #cam-fallback-btn:hover {
+      border-color: #00C8D5;
+      box-shadow: 0 0 0 4px rgba(0,200,213,0.28), 0 0 40px rgba(0,200,213,0.5);
+    }
+
     #hint {
       margin-top: 14px; font-family: 'Lexend Zetta', sans-serif;
       font-size: clamp(10px, 1.2vw, 14px); letter-spacing: 0.4em;
@@ -161,6 +194,7 @@
       <div id="hint">Raise your hand</div>
       <div id="progress-wrap"><div id="progress-bar"></div></div>
     </div>
+    <button id="cam-fallback-btn" type="button">Start</button>
     <div id="status">IDLE</div>
 
     <div id="gallery-loop">
@@ -582,10 +616,36 @@
   // ── WEBCAM ────────────────────────────────────────────────────────────────────
   const vid = document.getElementById('webcam')
   let camReady = false, lastFed = 0
-  navigator.mediaDevices
-    .getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } })
-    .then(s => { vid.srcObject = s; vid.play(); camReady = true })
-    .catch(() => { document.getElementById('status').textContent = 'NO CAMERA' })
+
+  // No camera hooked up yet (or permission denied) — fall back to a physical
+  // START button the TV remote's OK/select button can trigger, so the demo
+  // still runs without hand-raise detection. Visibility is driven entirely
+  // from the render loop (see animate()) — recomputed fresh every frame from
+  // camReady/state directly, rather than toggled by event handlers/timers,
+  // so there is no way for it to get stuck showing.
+  const camFallbackBtn = document.getElementById('cam-fallback-btn')
+  let _noCamIdleSince  = null   // timestamp we most recently entered no-camera+IDLE, or null
+  let _fallbackWasVisible = false
+  let _fallbackSuppressed = false   // true from click until state actually leaves IDLE
+
+  camFallbackBtn.addEventListener('click', () => {
+    if (camReady) return
+    _fallbackSuppressed = true
+    fire()   // message to podium/projector — sent right away, no delay
+    camFallbackBtn.classList.remove('visible')   // starts its own 0.5s fade-out
+    // Give the button a moment to ease out before the gallery eases in —
+    // triggering both in the same instant read as an abrupt jump cut.
+    setTimeout(() => go('COOLDOWN'), 450)
+  })
+
+  if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    navigator.mediaDevices
+      .getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' } })
+      .then(s => { vid.srcObject = s; vid.play(); camReady = true })
+      .catch(() => { document.getElementById('status').textContent = 'NO CAMERA' })
+  } else {
+    document.getElementById('status').textContent = 'NO CAMERA'
+  }
 
   // ── DOM REFS ──────────────────────────────────────────────────────────────────
   const ui    = document.getElementById('start-ui')
@@ -636,9 +696,39 @@
     if (state === 'FADING'   && el >= 1800) { go('COOLDOWN'); stableMs = 0; handMs = 0 }
     if (state === 'COOLDOWN' && el >= COOLDOWN_MS) { go('IDLE'); fired = false }
 
+    // ── Camera-fallback button ───────────────────────────────────────────────
+    // Visibility is recomputed fresh every frame from camReady/state — not
+    // toggled by event handlers or timers — so it can never end up stuck
+    // showing: the instant camReady flips true or state leaves IDLE, this
+    // unconditionally overrides whatever the class list currently says.
+    // _fallbackSuppressed covers the brief gap between a click and go('COOLDOWN')
+    // actually firing (state is still 'IDLE' during that gap) — without it,
+    // this per-frame check would re-add .visible on the very next frame and
+    // fight the button's own fade-out.
+    if (state !== 'IDLE') _fallbackSuppressed = false
+    const noCamIdle = !camReady && state === 'IDLE' && !_fallbackSuppressed
+    if (noCamIdle) {
+      if (_noCamIdleSince === null) _noCamIdleSince = now
+    } else {
+      _noCamIdleSince = null
+    }
+    // Let the ambient particles establish for a beat before the button eases in.
+    const showFallback = noCamIdle && (now - _noCamIdleSince) >= 1000
+    camFallbackBtn.classList.toggle('visible', showFallback)
+    if (showFallback && !_fallbackWasVisible) camFallbackBtn.focus()
+    _fallbackWasVisible = showFallback
+
     // ── Particle alphas ────────────────────────────────────────────────────────
-    const fade   = state === 'FADING' ? Math.max(0, 1 - el/1800) : 1
-    const sAlpha = idle ? 0
+    const fade = state === 'FADING' ? Math.max(0, 1 - el/1800) : 1
+
+    // No camera → IDLE has no hand-raise gesture to build toward, so the
+    // screen would otherwise sit fully black behind the fallback button.
+    // Give it a gentle ambient sparkle (scattered idle positions, slowly
+    // breathing) instead — camera-detected IDLE keeps the original alpha-0
+    // behavior untouched.
+    const noCamIdleAmbient = !camReady && state === 'IDLE'
+    const sAlpha = noCamIdleAmbient ? 0.32 + 0.14 * Math.sin(now * 0.0006)
+                 : idle ? 0
                  : state === 'DETECTING' ? 0.75 * Math.min(1, stableMs/STABLE_MS)
                  : 0.78 * fade
     const lf = idle ? 0.02 : 0.08

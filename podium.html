@@ -314,6 +314,29 @@
       transition: color 0.3s ease; padding: 8px 16px; margin-top: 8px;
     }
     .ps-cs-back:hover { color: #00B3BC; }
+
+    /* ── Prev/next project controls while on the case-study panel ──────────── */
+    .ps-cs-title-row {
+      display: flex; align-items: center; justify-content: center;
+      gap: clamp(14px, 2.5vw, 28px);
+    }
+    .ps-cs-nav-arrow {
+      flex: 0 0 auto;
+      width: clamp(36px, 4vw, 48px); height: clamp(36px, 4vw, 48px);
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 50%;
+      background: transparent; border: 1px solid rgba(0, 110, 116, 0.35);
+      color: rgba(200, 230, 255, 0.65); font-size: clamp(16px, 2vw, 22px);
+      cursor: pointer; transition: border-color 0.3s, color 0.3s, background 0.3s;
+      font-family: 'Lexend Giga', sans-serif;
+    }
+    .ps-cs-nav-arrow:hover {
+      border-color: #00B3BC; color: #00C8D0; background: rgba(0, 110, 116, 0.08);
+    }
+
+    .ps-cs-back-row {
+      display: flex; gap: clamp(20px, 3vw, 44px); align-items: center;
+    }
   </style>
 </head>
 <body>
@@ -358,7 +381,11 @@
   <!-- Panel 4: Case Study options (Video / Prototype / Gallery) -->
   <div id="ps-casestudy">
     <p class="ps-cs-eyebrow">Case Study</p>
-    <h2 class="ps-cs-title" id="ps-cs-title">—</h2>
+    <div class="ps-cs-title-row">
+      <button class="ps-cs-nav-arrow" id="ps-cs-prev" aria-label="Previous project">&#8592;</button>
+      <h2 class="ps-cs-title" id="ps-cs-title">—</h2>
+      <button class="ps-cs-nav-arrow" id="ps-cs-next" aria-label="Next project">&#8594;</button>
+    </div>
     <div class="ps-cs-options">
       <button class="ps-cs-btn" id="ps-cs-video">
         <div class="ps-cs-icon">
@@ -395,7 +422,10 @@
         <span class="ps-cs-label">Gallery</span>
       </button>
     </div>
-    <button class="ps-cs-back" id="ps-cs-back">&#8592; Back to Project</button>
+    <div class="ps-cs-back-row">
+      <button class="ps-cs-back" id="ps-cs-back">&#8592; Back to Project</button>
+      <button class="ps-cs-back" id="ps-cs-back-galaxy">&#8592; Back to Galaxy</button>
+    </div>
   </div>
 
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -546,6 +576,10 @@
     document.getElementById('ps-desc').textContent  = data.description
     document.getElementById('ps-tags').innerHTML    = data.tags.map(t =>
       `<span class="ps-nav-tag">${t}</span>`).join('')
+    // Keep the case-study panel's title in sync too, since prev/next can be
+    // pressed from there directly (while the projector shows the project
+    // description/overview page) as well as from the nav panel.
+    document.getElementById('ps-cs-title').textContent = data.title
     if (data.img !== undefined) {
       _currentProjData = { img: data.img || '', gallery: data.gallery || [], video: data.video || '' }
       _refreshCaseStudyIcons()
@@ -661,9 +695,15 @@
     localStorage.setItem('bec_openGallery', String(Date.now()))
   })
   document.getElementById('ps-cs-back').addEventListener('click', () => {
+    // Closes whatever sub-screen (video/proto/gallery) is open on the
+    // projector and returns it to the project description page — podium
+    // stays on this same case-study panel, since we're still on that page,
+    // not back at the galaxy. (Previously this called hideCaseStudy(),
+    // which jumped podium back to the nav/galaxy panel even though the
+    // projector was still showing the project overview — the panel would
+    // desync from what was actually on screen.)
     socket.emit('msg', { from: 'podium', to: 'all', fn: 'backToOverview', args: [] })
     localStorage.setItem('bec_backToOverview', String(Date.now()))
-    hideCaseStudy()
   })
 
   document.getElementById('ps-prev').addEventListener('click', () => {
@@ -680,6 +720,27 @@
     socket.emit('msg', { from: 'podium', to: 'all', fn: 'podiumBack', args: [] })
     localStorage.setItem('bec_podiumBack', String(Date.now()))
     hideNavPanel()
+  })
+
+  // Prev/next while on the project description page (case-study panel) —
+  // same messages the nav panel's arrows send; the projector routes them to
+  // whichever screen is actually open (see _podiumNav in src/main.js).
+  document.getElementById('ps-cs-prev').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'podiumPrev', args: [] })
+    localStorage.setItem('bec_podiumPrev', String(Date.now()))
+  })
+
+  document.getElementById('ps-cs-next').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'podiumNext', args: [] })
+    localStorage.setItem('bec_podiumNext', String(Date.now()))
+  })
+
+  // "Back to Galaxy" from the project description page — same message as the
+  // nav panel's back button. The projector's caseStudyClosed reply (sent from
+  // closeProjectOverview) is what actually switches podium back to #ps-nav.
+  document.getElementById('ps-cs-back-galaxy').addEventListener('click', () => {
+    socket.emit('msg', { from: 'podium', to: 'all', fn: 'podiumBack', args: [] })
+    localStorage.setItem('bec_podiumBack', String(Date.now()))
   })
   </script>
 </body>
