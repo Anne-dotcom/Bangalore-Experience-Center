@@ -7,6 +7,24 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; width: 100vw; height: 100vh; }
+
+    /* This TV is mounted rotated 90° clockwise (its native bottom edge ends
+       up on the left, its native top edge on the right) to run portrait.
+       The browser/panel itself still thinks it's driving a landscape frame,
+       so everything is authored landscape-side-up inside #tv-rotate, then
+       rotated -90° (counter-clockwise) in software here — the two rotations
+       cancel out and a viewer standing in front of the mounted TV sees it
+       upright. #tv-rotate's own box is pre-swapped (100vh × 100vw) so its
+       rotated bounding box exactly fills the real (landscape) viewport. */
+    #tv-rotate {
+      position: fixed;
+      top: 50%; left: 50%;
+      width: 100vh; height: 100vw;
+      transform: translate(-50%, -50%) rotate(-90deg);
+      transform-origin: center center;
+      overflow: hidden;
+    }
+
     canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
 
     #start-ui {
@@ -54,11 +72,12 @@
     }
 
     /* ── GALLERY LOOP ───────────────────────────────────────────────────────── */
-    /* The actual gallery — a ring of real GLB cube meshes (public/cube.glb,
-       the same model used for the project cards on the projector screen) —
-       renders as WebGL geometry on #tv-canvas itself (see the gal* code
-       below). This DOM layer only holds the transparent bloom wash and the
-       title/description text panel on top of it. */
+    /* The actual gallery — a field of real GLB cube meshes (public/cube.glb,
+       the same model used for the project cards on the projector screen)
+       floating at random, with each project's cube taking a turn front and
+       center — renders as WebGL geometry on #tv-canvas itself (see the gal*
+       code below). This DOM layer only holds the transparent bloom wash and
+       the title/description text panel on top of it. */
     #gallery-loop {
       position: fixed; inset: 0; z-index: 20;
       background: transparent;
@@ -134,22 +153,24 @@
   </style>
 </head>
 <body>
-  <video id="webcam" playsinline autoplay muted style="display:none"></video>
-  <canvas id="tv-canvas"></canvas>
-  <div id="start-ui">
-    <div id="start-word">START</div>
-    <div id="hint">Raise your hand</div>
-    <div id="progress-wrap"><div id="progress-bar"></div></div>
-  </div>
-  <div id="status">IDLE</div>
+  <div id="tv-rotate">
+    <video id="webcam" playsinline autoplay muted style="display:none"></video>
+    <canvas id="tv-canvas"></canvas>
+    <div id="start-ui">
+      <div id="start-word">START</div>
+      <div id="hint">Raise your hand</div>
+      <div id="progress-wrap"><div id="progress-bar"></div></div>
+    </div>
+    <div id="status">IDLE</div>
 
-  <div id="gallery-loop">
-    <div id="gl-stage"></div>
-    <div id="gl-info">
-      <div id="gl-title"></div>
-      <div id="gl-desc"></div>
-      <div id="gl-tags"></div>
-      <div id="gl-dots"></div>
+    <div id="gallery-loop">
+      <div id="gl-stage"></div>
+      <div id="gl-info">
+        <div id="gl-title"></div>
+        <div id="gl-desc"></div>
+        <div id="gl-tags"></div>
+        <div id="gl-dots"></div>
+      </div>
     </div>
   </div>
 
@@ -187,7 +208,13 @@
   const MASK_W = 160, MASK_H = 90
 
   // ── THREE.JS ──────────────────────────────────────────────────────────────────
-  const W = window.innerWidth, H = window.innerHeight
+  // W/H are the LOGICAL (pre-rotation) dimensions everything below is
+  // authored against — swapped from the real window size, since #tv-rotate
+  // is a portrait-shaped box (100vh × 100vw) that gets rotated -90° so its
+  // bounding box exactly fills the real (landscape-reported) viewport (see
+  // #tv-rotate in the <style> above). The canvas fills #tv-rotate 1:1, so
+  // its resolution must match: W = #tv-rotate's own width = innerHeight.
+  const W = window.innerHeight, H = window.innerWidth
   const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('tv-canvas'), antialias: false })
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
   renderer.setSize(W, H)
@@ -270,18 +297,29 @@
   const glowTX = new Float32Array(GLOW_N), glowTY = new Float32Array(GLOW_N)
   const rPhase = Float32Array.from({ length: RING_N }, () => (Math.random()-0.5)*0.3)
 
-  // ── GALLERY LOOP — real GLB cube carousel ──────────────────────────────────────
+  // ── GALLERY LOOP — floating GLB cube field ─────────────────────────────────────
   // Same cube.glb model + technique as createProjMesh() in src/main.js (the
   // project cards on the projector screen): the GLB shape cloned per project,
   // scaled to a fixed size, with a front-face plane carrying a CanvasTexture
-  // of the project image. Genuine WebGL geometry — not a DOM/CSS approximation
-  // — so there's no edge-on warping; a real cube just shows its side/back
-  // like a cube should. The cubes sit in a ring that slowly auto-rotates;
-  // whichever cube is nearest the camera drives the title/description panel.
-  const GL_RING_R    = 3.5
-  const GL_CUBE_SIZE = 1.35
-  const GL_ROT_SPEED = 0.0026   // rad/frame
-  const GL_ACTIVE_SCALE = 1.2
+  // of the project image. Genuine WebGL geometry — not a DOM/CSS approximation.
+  //
+  // All 10 cubes drift slowly at random positions/rotations in space. Every
+  // few seconds, the next project's cube breaks from the field and eases into
+  // a fixed spotlight slot — centered, pulled forward toward the camera,
+  // scaled up, facing dead-on — while the title/description panel updates to
+  // match. When its turn ends it drifts back out and the next one comes forward.
+  // The camera frame here is narrow (portrait aspect, W/H < 1 — see the W/H
+  // swap above), so cubes get much less horizontal room than vertical. Home
+  // positions and the spotlight are sized/placed to stay inside that frame
+  // with margin — see the fit math in the code comment on _rand() below.
+  const GL_CUBE_SIZE    = 1.35
+  const GL_CAM_FOV       = 40
+  const GL_CAM_DIST     = 9
+  const GL_ADVANCE_MS   = 3600
+  const GL_SPOT_POS     = new THREE.Vector3(0, 0, 1.0)   // centered, forward — not too close
+  const GL_SPOT_SCALE   = 1.35
+  const GL_BG_SCALE     = 0.55    // background (non-active) cubes render small and clearly secondary
+  const GL_FOLLOW_LERP  = 0.035   // how eagerly a cube chases its target transform
 
   let _cubeGLBScene   = null
   const _cubeGLBQueue = []
@@ -292,28 +330,41 @@
   })
 
   const galScene = new THREE.Scene()
-  const galCam   = new THREE.PerspectiveCamera(42, W / H, 0.1, 60)
-  galCam.position.set(0, 0, GL_RING_R + 4.6)
+  galScene.fog = new THREE.Fog(0x05101e, 7, 16)   // fades the far side of the floating field
+  const galCam = new THREE.PerspectiveCamera(GL_CAM_FOV, W / H, 0.1, 60)
+  galCam.position.set(0, 0, GL_CAM_DIST)
   galCam.lookAt(0, 0, 0)
 
-  galScene.add(new THREE.AmbientLight(0xffffff, 0.55))
+  galScene.add(new THREE.AmbientLight(0xffffff, 0.5))
   const galKey = new THREE.DirectionalLight(0xbfe9ff, 1.1)
   galKey.position.set(3, 5, 6)
   galScene.add(galKey)
   const galFill = new THREE.DirectionalLight(0x2050ff, 0.4)
   galFill.position.set(-4, -2, 3)
   galScene.add(galFill)
+  const galSpotLight = new THREE.PointLight(0x6fe0ff, 1.4, 9)
+  galSpotLight.position.copy(GL_SPOT_POS).add(new THREE.Vector3(0, 0, 1.5))
+  galScene.add(galSpotLight)
 
-  const galRing = new THREE.Group()
-  galRing.position.y = 1.05   // lifts the ring into the top 60% of the frame,
-  galScene.add(galRing)       // clear of the #gl-info text panel below
+  const galField = new THREE.Group()
+  galField.position.y = 1.05   // lifts the field into the top 60% of the frame,
+  galScene.add(galField)       // clear of the #gl-info text panel below
 
   const galProjTexLoader = new THREE.TextureLoader()
-  let _galCubes = []   // { group, angle }
+  let _galCubes = []   // { group, home, floatAmp, floatSpeed, floatPhase, spinSpeedX, spinSpeedY, baseRotX, baseRotY }
   let _galBuilt = false
-  let _galRotY  = 0
-  let _galActiveIdx = -1
+  let _galActiveIdx  = -1
+  let _galNextAdvance = 0
   let _galEl = null, _glInfo = null, _glTitle = null, _glDesc = null, _glTags = null, _glDots = null
+
+  const _rand = (a, b) => a + Math.random() * (b - a)
+
+  // Shortest-path angle lerp — avoids a cube spinning the long way around
+  // when its target rotation crosses the ±π boundary.
+  function _angleLerp(current, target, t) {
+    const diff = (((target - current) % (Math.PI * 2)) + Math.PI * 3) % (Math.PI * 2) - Math.PI
+    return current + diff * t
+  }
 
   function _buildGalCubes() {
     _galEl   = document.getElementById('gallery-loop')
@@ -323,10 +374,7 @@
     _glTags  = document.getElementById('gl-tags')
     _glDots  = document.getElementById('gl-dots')
 
-    const n = PROJECTS.length
-
-    PROJECTS.forEach((p, i) => {
-      const angle = (i / n) * Math.PI * 2
+    PROJECTS.forEach(p => {
       const group = new THREE.Group()
 
       const applyGLB = (glbScene) => {
@@ -373,11 +421,23 @@
         })
       }
 
-      group.position.set(Math.sin(angle) * GL_RING_R, 0, Math.cos(angle) * GL_RING_R)
-      group.rotation.y = angle
-      group.userData.targetScale = 1
-      galRing.add(group)
-      _galCubes.push({ group, angle })
+      // Random floating "home" — scattered well back from the spotlight slot,
+      // each with its own bob amplitude/speed/phase and slow tumble. Kept
+      // narrow on X (the portrait frame is much narrower than it is tall)
+      // and pushed back on Z so cubes read as small and spaced apart —
+      // home range + float amplitude together stay within the visible frustum.
+      const home = new THREE.Vector3(_rand(-0.85, 0.85), _rand(-1.9, 1.9), _rand(-5.5, -1.8))
+      galField.add(group)
+      _galCubes.push({
+        group, home,
+        floatAmp:   new THREE.Vector3(_rand(0.15, 0.3), _rand(0.25, 0.45), _rand(0.2, 0.4)),
+        floatSpeed: new THREE.Vector3(_rand(0.12, 0.28), _rand(0.1, 0.26), _rand(0.1, 0.22)),
+        floatPhase: new THREE.Vector3(_rand(0, Math.PI*2), _rand(0, Math.PI*2), _rand(0, Math.PI*2)),
+        spinSpeedY: _rand(-0.22, 0.22),
+        spinSpeedX: _rand(-0.1, 0.1),
+        baseRotY:   _rand(0, Math.PI*2),
+        baseRotX:   _rand(-0.25, 0.25),
+      })
     })
 
     PROJECTS.forEach(() => {
@@ -401,38 +461,41 @@
     else apply()
   }
 
-  function _glTick() {
-    _galRotY += GL_ROT_SPEED
-    galRing.rotation.y = _galRotY
-
-    // Whichever cube is angularly closest to the camera (angle ≈ 0) is "active"
-    let bestI = 0, bestD = Infinity
-    _galCubes.forEach((c, i) => {
-      let eff = (c.angle + _galRotY) % (Math.PI * 2)
-      if (eff > Math.PI) eff -= Math.PI * 2
-      if (eff < -Math.PI) eff += Math.PI * 2
-      const d = Math.abs(eff)
-      if (d < bestD) { bestD = d; bestI = i }
-    })
-    if (bestI !== _galActiveIdx) {
-      _galActiveIdx = bestI
-      _galCubes.forEach((c, i) => { c.group.userData.targetScale = i === bestI ? GL_ACTIVE_SCALE : 1 })
-      _glDots.querySelectorAll('.gl-dot').forEach((d, i) => d.classList.toggle('active', i === bestI))
+  function _glTick(now) {
+    if (now >= _galNextAdvance) {
+      _galActiveIdx   = (_galActiveIdx + 1) % _galCubes.length
+      _galNextAdvance = now + GL_ADVANCE_MS
+      _glDots.querySelectorAll('.gl-dot').forEach((d, i) => d.classList.toggle('active', i === _galActiveIdx))
       _updateGalleryInfo(true)
     }
 
-    _galCubes.forEach(c => {
-      const ts = c.group.userData.targetScale
-      const ns = c.group.scale.x + (ts - c.group.scale.x) * 0.08
-      c.group.scale.setScalar(ns)
+    const tSec = now * 0.001
+    _galCubes.forEach((c, i) => {
+      const isActive = i === _galActiveIdx
+
+      const floatPos = isActive ? GL_SPOT_POS : new THREE.Vector3(
+        c.home.x + Math.sin(tSec * c.floatSpeed.x + c.floatPhase.x) * c.floatAmp.x,
+        c.home.y + Math.sin(tSec * c.floatSpeed.y + c.floatPhase.y) * c.floatAmp.y,
+        c.home.z + Math.sin(tSec * c.floatSpeed.z + c.floatPhase.z) * c.floatAmp.z,
+      )
+      const targetRotY = isActive ? 0 : c.baseRotY + tSec * c.spinSpeedY
+      const targetRotX = isActive ? 0 : c.baseRotX + Math.sin(tSec * 0.2 + c.floatPhase.x) * 0.15
+      const targetScale = isActive ? GL_SPOT_SCALE : GL_BG_SCALE
+
+      c.group.position.lerp(floatPos, GL_FOLLOW_LERP)
+      c.group.rotation.y = _angleLerp(c.group.rotation.y, targetRotY, GL_FOLLOW_LERP)
+      c.group.rotation.x = _angleLerp(c.group.rotation.x, targetRotX, GL_FOLLOW_LERP)
+      const s = c.group.scale.x + (targetScale - c.group.scale.x) * GL_FOLLOW_LERP
+      c.group.scale.setScalar(s)
     })
   }
 
   function showGallery() {
     if (!_galBuilt) _buildGalCubes()
-    _galRotY = 0
-    _galActiveIdx = -1
-    galRing.rotation.y = 0
+    _galActiveIdx   = 0
+    _galNextAdvance = performance.now() + GL_ADVANCE_MS
+    _glDots.querySelectorAll('.gl-dot').forEach((d, i) => d.classList.toggle('active', i === 0))
+    _updateGalleryInfo(false)
     _galEl.classList.add('visible')
   }
 
@@ -633,7 +696,7 @@
 
     // ── Gallery cube ring — layered on top, only while looping ──────────────
     if (state === 'COOLDOWN') {
-      _glTick()
+      _glTick(now)
       renderer.autoClear = false
       renderer.clearDepth()
       renderer.render(galScene, galCam)

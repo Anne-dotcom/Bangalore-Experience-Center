@@ -2,10 +2,22 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>BEC — Podium</title>
   <link href="https://fonts.googleapis.com/css2?family=Lexend+Zetta:wght@700;800&family=Lexend+Giga:wght@300&display=swap" rel="stylesheet">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    /* This runs on a touchscreen kiosk — taps already fire as click events,
+       but without these the panel gets pinch-zoom, double-tap-to-zoom delay,
+       long-press callouts, and text-selection highlighting on every tap. */
+    html, body {
+      touch-action: manipulation;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      overscroll-behavior: none;
+      -webkit-tap-highlight-color: transparent;
+    }
     body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
 
     /* Dark background — stays black, tunnel effect fills the canvas */
