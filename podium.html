@@ -18,6 +18,19 @@
       overscroll-behavior: none;
       -webkit-tap-highlight-color: transparent;
     }
+    /* touch-action is NOT inherited (per spec) — setting it on html/body
+       above has no effect on descendant buttons. Without this, the browser
+       can treat an ambiguous first touch on a button as a possible
+       scroll/pan gesture and never fire click at all, which is exactly
+       "touch works everywhere except this page." Every actual tap target
+       needs its own touch-action. */
+    button {
+      touch-action: manipulation;
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
     body { background: #000; width: 100vw; height: 100vh; overflow: hidden; }
 
     /* Dark background — stays black, tunnel effect fills the canvas */
