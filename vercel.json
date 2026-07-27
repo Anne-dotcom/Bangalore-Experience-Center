@@ -1,0 +1,16 @@
+{
+  "redirects": [
+    {
+      "source": "/tv",
+      "destination": "/tv.html?server=https://bangalore-experience-center-production.up.railway.app"
+    },
+    {
+      "source": "/podium",
+      "destination": "/podium.html?server=https://bangalore-experience-center-production.up.railway.app"
+    },
+    {
+      "source": "/projector",
+      "destination": "/?server=https://bangalore-experience-center-production.up.railway.app"
+    }
+  ]
+}
