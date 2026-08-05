@@ -694,7 +694,11 @@
       if (!visible) go('FADING')
     }
     if (state === 'FADING'   && el >= 1800) { go('COOLDOWN'); stableMs = 0; handMs = 0 }
-    if (state === 'COOLDOWN' && el >= COOLDOWN_MS) { go('IDLE'); fired = false }
+    // COOLDOWN no longer auto-expires back to IDLE — once the gallery starts
+    // it keeps cycling through the project cube field indefinitely. _glTick's
+    // `(_galActiveIdx + 1) % n` already wraps from the last project back to
+    // the first, so this alone makes it loop forever instead of cutting back
+    // to the START screen after 30s (often mid-way through the first pass).
 
     // ── Camera-fallback button ───────────────────────────────────────────────
     // Visibility is recomputed fresh every frame from camReady/state — not

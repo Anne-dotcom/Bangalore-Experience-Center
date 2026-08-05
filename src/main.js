@@ -1446,6 +1446,18 @@ function createProjMesh(d) {
   return group
 }
 
+// createProjMesh() returns a THREE.Group (GLB clone + front-face plane), not a
+// raw Mesh — dispose by traversing its mesh children instead of touching
+// .geometry/.material directly on the group itself.
+function _disposeProjMesh(m) {
+  m.traverse(child => {
+    if (!child.isMesh) return
+    child.geometry.dispose()
+    const mats = Array.isArray(child.material) ? child.material : [child.material]
+    mats.forEach(mat => { mat.map?.dispose(); mat.dispose() })
+  })
+}
+
 // ── Project Overview Screen ──────────────────────────────────────────────────
 
 // Project a mesh's center to viewport coordinates using the known design-space transform.
@@ -2976,7 +2988,7 @@ function createGalaxyView() {
   _vig.id = 'galaxy-vignette'
   Object.assign(_vig.style, {
     position: 'fixed', inset: '0', pointerEvents: 'none', zIndex: '10',
-    background: 'radial-gradient(ellipse at center, transparent 38%, rgba(0,0,0,0.55) 72%, rgba(0,0,0,0.88) 100%)',
+    background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.32) 78%, rgba(0,0,0,0.55) 100%)',
     opacity: '0', transition: 'opacity 1.4s ease',
   })
   document.body.appendChild(_vig)
@@ -3155,12 +3167,10 @@ function exitGalaxyToDisc() {
     shadowReceiverMesh = null
   }
 
-  // Remove THREE.js plane meshes from camera
+  // Remove project cube groups from camera
   projectMeshes.forEach(m => {
     terrainPerspCamera.remove(m)
-    m.geometry.dispose()
-    if (Array.isArray(m.material)) m.material.forEach(mat => mat.dispose())
-    else m.material.dispose()
+    _disposeProjMesh(m)
   })
   projectMeshes    = []
   lastActiveIdx    = -1
@@ -3211,9 +3221,7 @@ function destroyGalaxyView() {
   if (bandOverlayEl)  { bandOverlayEl.remove();  bandOverlayEl  = null }
   projectMeshes.forEach(m => {
     terrainPerspCamera.remove(m)
-    m.geometry.dispose()
-    if (Array.isArray(m.material)) m.material.forEach(mat => mat.dispose())
-    else m.material.dispose()
+    _disposeProjMesh(m)
   })
   projectMeshes    = []
   if (projInfoEl) { projInfoEl.remove(); projInfoEl = null }
@@ -3959,13 +3967,41 @@ if (ROLE === 'projector' || !ROLE) {
     transitionToProject((activeProjIdx + dir + N) % N, dir)
   }
 
-  onMessage('podiumNext', () => _podiumNav(1))
-  onMessage('podiumPrev', () => _podiumNav(-1))
-  onMessage('podiumBack', () => {
-    // "Back to Galaxy" on the podium closes the project overview and returns to the
-    // galaxy view (cube spins back, all cubes stay visible).  It does NOT exit the
-    // galaxy — exitGalaxyToDisc() is only called when there is no overview open.
-    if (projOverviewEl) {
+  // Every podium action arrives over TWO channels at once — the socket.io
+  // relay (onMessage) and a same-origin localStorage 'storage' event
+  // (fallback for when podium/projector/tv share one machine/browser). When
+  // both channels are actually live at once (e.g. all screens on one PC),
+  // a single tap fires its handler twice — most visibly on prev/next, which
+  // has no idempotency guard of its own, so one tap skipped two projects.
+  // _dedupAction collapses each action to a single shared handler so
+  // whichever channel arrives first "wins" and the near-simultaneous repeat
+  // from the other channel is dropped.
+  function _dedupAction(fn) {
+    let lastAt = 0
+    return (...args) => {
+      const now = Date.now()
+      if (now - lastAt < 250) return
+      lastAt = now
+      fn(...args)
+    }
+  }
+
+  const _onPodiumNext = _dedupAction(() => _podiumNav(1))
+  const _onPodiumPrev = _dedupAction(() => _podiumNav(-1))
+  const _onPodiumBack = _dedupAction(() => {
+    // Steps back one level per tap: sub-screen (video/proto/gallery) → project
+    // overview → galaxy cube → home. Previously this skipped straight to the
+    // projOverviewEl check even while a sub-screen was open on top of it —
+    // closeProjectOverview() would silently remove the overview underneath
+    // (and tell podium the case study had closed) while the sub-screen stayed
+    // stuck on screen, desyncing podium's panel from what the projector
+    // actually showed.
+    if (videoScreenEl || protoScreenEl || galleryScreenEl) {
+      _pendingMediaAction = null
+      if (videoScreenEl)        closeVideoScreen()
+      else if (protoScreenEl)   closeProtoScreen()
+      else if (galleryScreenEl) closeGalleryScreen()
+    } else if (projOverviewEl) {
       closeProjectOverview()
     } else if (_projCubeSpinning) {
       // Overview cube is still mid-spin (opening or closing) — queue it so the
@@ -3976,69 +4012,55 @@ if (ROLE === 'projector' || !ROLE) {
       exitGalaxyToDisc()
     }
   })
-  onMessage('viewCaseStudy', () => {
+  const _onViewCaseStudy = _dedupAction(() => {
     if (galaxyActive) openProjectOverview(activeProjIdx)
   })
-  onMessage('openVideo', () => {
+  const _onOpenVideo = _dedupAction(() => {
     const btn = document.getElementById('ov-video-btn')
     if (btn && projOverviewEl) openVideoScreen(projOverviewIdx >= 0 ? projOverviewIdx : activeProjIdx, btn)
     else if (_projCubeSpinning) _pendingMediaAction = 'video'
   })
-  onMessage('openProto', () => {
+  const _onOpenProto = _dedupAction(() => {
     const btn = document.getElementById('ov-proto-btn')
     if (btn && projOverviewEl) openProtoScreen(projOverviewIdx >= 0 ? projOverviewIdx : activeProjIdx, btn)
     else if (_projCubeSpinning) _pendingMediaAction = 'proto'
   })
-  onMessage('openGallery', () => {
+  const _onOpenGallery = _dedupAction(() => {
     const btn = document.getElementById('ov-gallery-btn')
     if (btn && projOverviewEl) openGalleryScreen(projOverviewIdx >= 0 ? projOverviewIdx : activeProjIdx, btn)
     else if (_projCubeSpinning) _pendingMediaAction = 'gallery'
   })
-  onMessage('closeCaseStudy', () => {
+  const _onCloseCaseStudy = _dedupAction(() => {
     if (projOverviewEl) closeProjectOverview()
   })
-  onMessage('backToOverview', () => {
+  const _onBackToOverview = _dedupAction(() => {
     _pendingMediaAction = null   // cancel queued action if user backed out early
     if (videoScreenEl)        closeVideoScreen()
     else if (protoScreenEl)   closeProtoScreen()
     else if (galleryScreenEl) closeGalleryScreen()
     // overview is already visible underneath if none of the above were open
   })
+
+  onMessage('podiumNext', _onPodiumNext)
+  onMessage('podiumPrev', _onPodiumPrev)
+  onMessage('podiumBack', _onPodiumBack)
+  onMessage('viewCaseStudy', _onViewCaseStudy)
+  onMessage('openVideo', _onOpenVideo)
+  onMessage('openProto', _onOpenProto)
+  onMessage('openGallery', _onOpenGallery)
+  onMessage('closeCaseStudy', _onCloseCaseStudy)
+  onMessage('backToOverview', _onBackToOverview)
+
   window.addEventListener('storage', e => {
-    if (e.key === 'bec_podiumNext') _podiumNav(1)
-    if (e.key === 'bec_podiumPrev') _podiumNav(-1)
-    if (e.key === 'bec_podiumBack') {
-      if (projOverviewEl) {
-        closeProjectOverview()
-      } else if (_projCubeSpinning) {
-        _pendingGalaxyExit = true
-      } else if (galaxyActive) {
-        exitGalaxyToDisc()
-      }
-    }
-    if (e.key === 'bec_viewCaseStudy' && galaxyActive) openProjectOverview(activeProjIdx)
-    if (e.key === 'bec_openVideo') {
-      const btn = document.getElementById('ov-video-btn')
-      if (btn && projOverviewEl) openVideoScreen(projOverviewIdx >= 0 ? projOverviewIdx : activeProjIdx, btn)
-      else if (_projCubeSpinning) _pendingMediaAction = 'video'
-    }
-    if (e.key === 'bec_openProto') {
-      const btn = document.getElementById('ov-proto-btn')
-      if (btn && projOverviewEl) openProtoScreen(projOverviewIdx >= 0 ? projOverviewIdx : activeProjIdx, btn)
-      else if (_projCubeSpinning) _pendingMediaAction = 'proto'
-    }
-    if (e.key === 'bec_openGallery') {
-      const btn = document.getElementById('ov-gallery-btn')
-      if (btn && projOverviewEl) openGalleryScreen(projOverviewIdx >= 0 ? projOverviewIdx : activeProjIdx, btn)
-      else if (_projCubeSpinning) _pendingMediaAction = 'gallery'
-    }
-    if (e.key === 'bec_closeCaseStudy' && projOverviewEl) closeProjectOverview()
-    if (e.key === 'bec_backToOverview') {
-      _pendingMediaAction = null
-      if (videoScreenEl)        closeVideoScreen()
-      else if (protoScreenEl)   closeProtoScreen()
-      else if (galleryScreenEl) closeGalleryScreen()
-    }
+    if (e.key === 'bec_podiumNext')     _onPodiumNext()
+    if (e.key === 'bec_podiumPrev')     _onPodiumPrev()
+    if (e.key === 'bec_podiumBack')     _onPodiumBack()
+    if (e.key === 'bec_viewCaseStudy')  _onViewCaseStudy()
+    if (e.key === 'bec_openVideo')      _onOpenVideo()
+    if (e.key === 'bec_openProto')      _onOpenProto()
+    if (e.key === 'bec_openGallery')    _onOpenGallery()
+    if (e.key === 'bec_closeCaseStudy') _onCloseCaseStudy()
+    if (e.key === 'bec_backToOverview') _onBackToOverview()
   })
 }
 
